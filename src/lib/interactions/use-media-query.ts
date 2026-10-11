@@ -7,7 +7,7 @@ import { useSyncExternalStore } from "react";
  * so hydration never mismatches: React re-renders right after hydration with
  * the real value of the device.
  */
-export function useMediaQuery(query: string): boolean {
+function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
     (onStoreChange) => {
       if (typeof window === "undefined" || !window.matchMedia) return () => {};
@@ -23,8 +23,8 @@ export function useMediaQuery(query: string): boolean {
   );
 }
 
-export const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-export const FINE_POINTER_QUERY = "(hover: hover) and (pointer: fine)";
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+const FINE_POINTER_QUERY = "(hover: hover) and (pointer: fine)";
 
 /** True when the user asked the system for less movement. */
 export function usePrefersReducedMotion(): boolean {

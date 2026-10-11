@@ -11,10 +11,10 @@ import {
   type GestureAxis,
 } from "./gesture";
 
-export type SwipeDirection = "forward" | "backward";
+type SwipeDirection = "forward" | "backward";
 
 /** Never start a panel change from one of these. */
-export const PANEL_SWIPE_IGNORE =
+const PANEL_SWIPE_IGNORE =
   'a, button, input, select, textarea, label, summary, [role="button"], [role="tab"], [role="switch"],' +
   ' [role="combobox"], [role="listbox"], [role="option"], [role="radio"], [role="slider"], [contenteditable="true"],' +
   " [data-rail], [data-swipe-reveal], [data-swipe-ignore]";
@@ -39,7 +39,7 @@ function dampedOffset(dx: number, index: number, count: number, width: number): 
   return Math.max(-width, Math.min(width, dx));
 }
 
-export type PanelSwipeOptions = {
+type PanelSwipeOptions = {
   index: number;
   count: number;
   onSwipe: (direction: SwipeDirection) => void;

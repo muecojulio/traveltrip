@@ -59,7 +59,10 @@ test("non-.sql entries are dropped (readdir also yields the auth/ directory)", (
 test("the quote cache is globbed while the auth schema stays outside", () => {
   const migrationsDir = join(projectRoot(), "migrations");
   const pending = pendingMigrations(readdirSync(migrationsDir), []);
-  assert.deepEqual(pending.map(({ name }) => name), ["0002_quote_cache.sql"]);
+  assert.deepEqual(
+    pending.map(({ name }) => name),
+    ["0002_quote_cache.sql", "0003_cache_and_indexes.sql"],
+  );
   assert.ok(readdirSync(join(migrationsDir, "auth")).includes("0001_auth.sql"));
   assert.ok(!readdirSync(migrationsDir).includes("0001_auth.sql"));
 });

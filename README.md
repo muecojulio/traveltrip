@@ -1,26 +1,29 @@
-# TravelTrip
+# TravelTrip — México Vivo
 
-Cotizador de vacaciones en México: eliges destino, fechas, adultos y hotel; compara el alojamiento con un vuelo redondo cuando corresponde y calcula la combinación más barata disponible.
+Cotizador visual de vacaciones en México: eliges destino, fechas, adultos y hotel; compara el alojamiento con un vuelo redondo cuando corresponde y calcula la combinación más barata disponible en tiempo real.
 
 ## Qué hace
 
-- Busca tarifas de hotel al momento de la consulta y permite elegir un hotel para recalcular el total.
-- Incluye fechas de entrada y salida, número de adultos, precio por noche y total estimado de estancia.
-- Para destinos distintos de Cuernavaca, Veracruz y Acapulco, busca vuelos redondos desde un aeropuerto mexicano seleccionado.
-- Por defecto filtra llegadas el mismo día antes o a las 14:00 y tarifas donde la fuente confirma maleta de mano. La fuente debe confirmar el equipaje; un artículo personal no cuenta como maleta de mano.
-- Suma estancia y vuelo para mostrar la opción más barata y sus componentes. El precio consultado y su hora aparecen en el resultado; la caché anónima dura hasta cinco minutos.
-- Abre Booking, Despegar, Google Flights, páginas oficiales de aerolíneas y búsqueda del sitio oficial del hotel con fechas y ocupación cuando el destino/fuente lo permite.
-- Guarda viajes únicamente en el almacenamiento local del navegador; no pide cuenta ni datos de pago.
+- **Explorador Visual de Destinos («México Vivo»):** 25+ destinos mexicanos ilustrados por paisaje (Caribe, Pacífico, Colonial, Selva, Desierto y Metrópoli), filtro por región, clima típico y escapadas rápidas sugeridas a un clic.
+- **Comparación en Vivo:** Busca tarifas de hotel al momento de la consulta y permite alternar entre hoteles para recalcular el paquete total y el costo por persona al instante.
+- **Vuelos con Reglas de Comodidad:** Para destinos con vuelo, consulta vuelos redondos desde 10 aeropuertos mexicanos filtrando por defecto llegadas el mismo día antes o a las 14:00 hrs y tarifas con maleta de mano confirmada.
+- **Caché Multi-Nivel e Índices de Base de Datos:**
+  - **L1 en memoria (LRU)** + deduplicación de consultas concurrentes (`inFlight`).
+  - **L2 en base de datos (`quote_cache` y `service_cache`)** con índices compuestos sobre `(destination_id, origin_iata, fetched_at desc)`, expiración (`expires_at`), mejor precio (`best_total_mxn`) y categoría de servicio (tipo de cambio USD/MXN, geocodificación y pronóstico del clima).
+- **Seguridad Activa (Defensa en Profundidad):**
+  - Validación de esquemas con `Zod` y sanitización contra inyección y recorrido de rutas (`..`).
+  - Lista blanca estricta HTTPS anti-SSRF y lectura en streaming con tope de bytes (`readResponseBytesWithLimit`).
+  - Limitación de tasa (`Rate Limiting`) por ventana deslizante.
+  - Cabeceras HTTP de seguridad y sanitización de enlaces externos (`rel="noopener noreferrer"`).
+- **Política de Privacidad Integral (`/privacidad`):** Alineada con la LFPDPPP en México; incluye auditoría en vivo y botón para borrar todos los datos guardados en `localStorage`.
 
 ## Fuentes sin llave
 
-- Google Hotels y Google Flights: lectura de páginas públicas para obtener precios al consultar. Booking y Despegar no ofrecen aquí un endpoint público estable sin registro; se abren como búsquedas de comparación con los datos elegidos.
-- OctoTrip MCP público y Google Flights vía [`google-flights-ts`](https://github.com/wooldox/google-flights-ts): consultas de vuelos sin API key ni inicio de sesión. Google Flights es una integración no oficial y puede cambiar o limitar solicitudes. Cuando la tarifa no confirma equipaje, no se presenta como una combinación que incluya maleta.
-- [Open-Meteo](https://open-meteo.com/): clima sin llave.
-- [Nominatim / OpenStreetMap](https://nominatim.openstreetmap.org/): geocodificación de otra ciudad sin llave.
-- [Currency API](https://github.com/fawazahmed0/currency-api): conversión pública USD/MXN sin llave.
-
-Los precios de hoteles y vuelos cambian según disponibilidad, impuestos y tarifa final. TravelTrip los compara, pero la reserva y confirmación se hacen directamente con el proveedor. Si no hay un aeropuerto identificable o una maleta confirmada, la app evita inventar un precio total.
+- **Google Hotels y Google Flights:** Lectura de páginas públicas para obtener precios al consultar. Booking y Despegar se abren como búsquedas directas con las fechas y ocupación elegidas.
+- **OctoTrip MCP público y Google Flights vía [`google-flights-ts`](https://github.com/wooldox/google-flights-ts):** Consultas de vuelos sin API key ni cuenta.
+- **[Open-Meteo](https://open-meteo.com/):** Pronóstico meteorológico diario sin llave.
+- **[Nominatim / OpenStreetMap](https://nominatim.openstreetmap.org/):** Geocodificación de cualquier ciudad mexicana sin llave.
+- **[Currency API](https://github.com/fawazahmed0/currency-api):** Conversión pública USD/MXN sin llave.
 
 ## Atribución
 

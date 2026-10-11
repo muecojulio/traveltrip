@@ -1,36 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f6f1e8;
-  --bg-elev: #fffdf8;
-  --ink: #1a1814;
-  --muted: #5c574e;
-  --line: #e4d9c8;
-  --lagoon: #1f4d4a;
-  --lagoon-soft: #e5f0ec;
-  --clay: #c4653a;
-  --clay-ink: #fff8f3;
-  --knob: #fffdf8;
-  --good: #1f4d4a;
-  --warn: #8a5a12;
-  --shadow: 0 12px 40px rgb(26 24 20 / 8%);
+  --bg: #f7f0e4;
+  --bg-elev: #fffcf6;
+  --ink: #191612;
+  --muted: #5b5349;
+  --line: #e2d4be;
+  --lagoon: #13615c;
+  --lagoon-soft: #dff1ec;
+  --clay: #cc5229;
+  --clay-ink: #fff9f5;
+  --marigold: #d98a12;
+  --fiesta: #b8336a;
+  --jade: #1e7a52;
+  --knob: #fffcf6;
+  --good: #13615c;
+  --warn: #8a520d;
+  --shadow: 0 14px 38px rgb(25 22 18 / 10%);
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --bg: #121614;
-  --bg-elev: #1c2420;
-  --ink: #f4efe6;
-  --muted: #b7b1a4;
-  --line: #31403a;
-  --lagoon: #8fcebb;
-  --lagoon-soft: #1a2e2b;
-  --clay: #e08a5d;
-  --clay-ink: #2a140c;
-  --knob: #121614;
-  --good: #b7d7a8;
-  --warn: #e7c27a;
-  --shadow: 0 16px 40px rgb(0 0 0 / 28%);
+  --bg: #0f1615;
+  --bg-elev: #182321;
+  --ink: #f6f0e6;
+  --muted: #b8b1a3;
+  --line: #2b3d38;
+  --lagoon: #5eead4;
+  --lagoon-soft: #152d2a;
+  --clay: #f27d4b;
+  --clay-ink: #240f06;
+  --marigold: #fbbf24;
+  --fiesta: #f472b6;
+  --jade: #34d399;
+  --knob: #0f1615;
+  --good: #86efac;
+  --warn: #fcd34d;
+  --shadow: 0 18px 44px rgb(0 0 0 / 36%);
   color-scheme: dark;
 }
 
@@ -44,10 +50,13 @@
   --color-lagoon-soft: var(--lagoon-soft);
   --color-clay: var(--clay);
   --color-clay-ink: var(--clay-ink);
+  --color-marigold: var(--marigold);
+  --color-fiesta: var(--fiesta);
+  --color-jade: var(--jade);
   --color-knob: var(--knob);
   --color-good: var(--good);
   --color-warn: var(--warn);
-  --font-sans: "Outfit", system-ui, sans-serif;
+  --font-sans: "Outfit", system-ui, -apple-system, sans-serif;
   --font-display: "Fraunces", Georgia, serif;
   --radius-card: 1.25rem;
   /* One shared easing for every micro-interaction in the app. */
@@ -72,6 +81,11 @@
 
   body {
     margin: 0;
+    background-image:
+      radial-gradient(circle at 12% 8%, color-mix(in oklab, var(--clay) 11%, transparent) 0%, transparent 38%),
+      radial-gradient(circle at 88% 12%, color-mix(in oklab, var(--lagoon) 13%, transparent) 0%, transparent 42%),
+      radial-gradient(circle at 50% 90%, color-mix(in oklab, var(--marigold) 9%, transparent) 0%, transparent 45%);
+    background-attachment: fixed;
   }
 
   button:not(:disabled),
@@ -175,8 +189,36 @@
   }
 }
 
+@keyframes float-gentle {
+  0%,
+  100% {
+    transform: translate(262px, 36px) rotate(4deg);
+  }
+  50% {
+    transform: translate(262px, 31px) rotate(1deg);
+  }
+}
+
+@keyframes pulse-halo {
+  0%,
+  100% {
+    opacity: 0.92;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+
 .rise {
   animation: rise 220ms var(--ease-soft);
+}
+
+.float-plane {
+  animation: float-gentle 4s ease-in-out infinite;
+}
+
+.pulse-slow {
+  animation: pulse-halo 5s ease-in-out infinite;
 }
 
 /* Panels cross in from the direction the user came from, 200 ms, short travel. */
@@ -240,12 +282,12 @@
    interactive, and never applied on touch. */
 @media (hover: hover) and (pointer: fine) {
   .lift:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 18px rgb(26 24 20 / 12%);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgb(26 24 20 / 15%);
   }
 
   .action:hover:not(:disabled)[data-state="idle"] {
-    filter: brightness(1.04);
+    filter: brightness(1.05);
   }
 }
 
@@ -328,6 +370,7 @@
   touch-action: pan-y pinch-zoom;
   transform: translateX(var(--reveal-x, 0px));
   transition: transform 240ms var(--ease-soft);
+  z-index: 1;
 }
 
 .swipe-surface.is-dragging {
@@ -336,10 +379,6 @@
 
 .swipe-actions {
   z-index: 0;
-}
-
-.swipe-surface {
-  z-index: 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -455,6 +494,12 @@
   box-shadow: var(--shadow);
 }
 
+/* Perforated boarding-pass divider */
+.ticket-divider {
+  position: relative;
+  border-top: 2px dashed var(--line);
+}
+
 /* ------------------------------------------------------------------ */
 /* Reduced motion                                                      */
 /* ------------------------------------------------------------------ */
@@ -474,7 +519,9 @@
     transform: none;
   }
 
-  .spin {
+  .spin,
+  .float-plane,
+  .pulse-slow {
     animation: none;
   }
 

@@ -1,3 +1,12 @@
+export type DestinationRegion = "playa" | "cultura" | "escapada" | "ciudades";
+export type DestinationScenery =
+  | "caribe"
+  | "pacifico"
+  | "colonial"
+  | "desierto"
+  | "selva"
+  | "metropoli";
+
 export type Destination = {
   id: string;
   city: string;
@@ -8,6 +17,10 @@ export type Destination = {
   iata: string | null;
   /** Cuernavaca, Veracruz and Acapulco are the only no-flight destinations. */
   groundOnly: boolean;
+  region: DestinationRegion;
+  scenery: DestinationScenery;
+  avgTempC: number;
+  highlights: string[];
 };
 
 export type Origin = {
@@ -15,6 +28,69 @@ export type Origin = {
   city: string;
   airport: string;
 };
+
+export type QuickEscape = {
+  id: string;
+  title: string;
+  subtitle: string;
+  destinationId: string;
+  nights: number;
+  badge: string;
+};
+
+export const DESTINATION_REGIONS: {
+  id: "todos" | DestinationRegion;
+  label: string;
+}[] = [
+  { id: "todos", label: "Todos" },
+  { id: "playa", label: "Playas y Mar" },
+  { id: "cultura", label: "Pueblos y Cultura" },
+  { id: "escapada", label: "Sin Vuelo" },
+  { id: "ciudades", label: "Ciudades y Norte" },
+];
+
+export const QUICK_ESCAPES: QuickEscape[] = [
+  {
+    id: "escape-cuernavaca",
+    title: "Fin de semana en Cuernavaca",
+    subtitle: "2 noches · Sin vuelo · Jardines y alberca",
+    destinationId: "cuernavaca",
+    nights: 2,
+    badge: "Escapada rápida",
+  },
+  {
+    id: "escape-cancun",
+    title: "Caribe Turquesa en Cancún",
+    subtitle: "4 noches · Vuelo < 2 pm · Mar y arrecifes",
+    destinationId: "cancun",
+    nights: 4,
+    badge: "Favorito playa",
+  },
+  {
+    id: "escape-oaxaca",
+    title: "Ruta Gastronómica en Oaxaca",
+    subtitle: "3 noches · Mercados, mezcal y Monte Albán",
+    destinationId: "oaxaca",
+    nights: 3,
+    badge: "Cultura viva",
+  },
+  {
+    id: "escape-escondido",
+    title: "Olas y Atardecer en Pto. Escondido",
+    subtitle: "4 noches · Zicatela y Mazunte",
+    destinationId: "puerto-escondido",
+    nights: 4,
+    badge: "Costa oaxaqueña",
+  },
+  {
+    id: "escape-merida",
+    title: "Haciendas y Cenotes en Mérida",
+    subtitle: "3 noches · Paseo de Montejo y cochinita",
+    destinationId: "merida",
+    nights: 3,
+    badge: "Joya maya",
+  },
+];
 
 export const ORIGINS: Origin[] = [
   { iata: "MEX", city: "Ciudad de México", airport: "AICM" },
@@ -39,6 +115,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -99.2216,
     iata: null,
     groundOnly: true,
+    region: "escapada",
+    scenery: "selva",
+    avgTempC: 26,
+    highlights: ["Jardín Borda", "Palacio de Cortés", "Tepoztlán cerca"],
   },
   {
     id: "veracruz",
@@ -49,6 +129,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -96.1342,
     iata: null,
     groundOnly: true,
+    region: "escapada",
+    scenery: "caribe",
+    avgTempC: 29,
+    highlights: ["Malecón", "San Juan de Ulúa", "Café de La Parroquia"],
   },
   {
     id: "acapulco",
@@ -59,6 +143,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -99.8237,
     iata: null,
     groundOnly: true,
+    region: "escapada",
+    scenery: "pacifico",
+    avgTempC: 30,
+    highlights: ["La Quebrada", "Bahía de Santa Lucía", "Pie de la Cuesta"],
   },
   {
     id: "cancun",
@@ -69,6 +157,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -86.8515,
     iata: "CUN",
     groundOnly: false,
+    region: "playa",
+    scenery: "caribe",
+    avgTempC: 29,
+    highlights: ["Playa Delfines", "Isla Mujeres", "Laguna Nichupté"],
   },
   {
     id: "tulum",
@@ -79,6 +171,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -87.4654,
     iata: "TQO",
     groundOnly: false,
+    region: "playa",
+    scenery: "selva",
+    avgTempC: 29,
+    highlights: ["Zona Arqueológica", "Gran Cenote", "Sian Ka'an"],
   },
   {
     id: "vallarta",
@@ -89,6 +185,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -105.2253,
     iata: "PVR",
     groundOnly: false,
+    region: "playa",
+    scenery: "pacifico",
+    avgTempC: 28,
+    highlights: ["Malecón Escultórico", "Zona Romántica", "Los Arcos"],
   },
   {
     id: "cabos",
@@ -99,6 +199,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -109.702,
     iata: "SJD",
     groundOnly: false,
+    region: "playa",
+    scenery: "desierto",
+    avgTempC: 27,
+    highlights: ["El Arco", "Playa del Amor", "San José del Cabo"],
   },
   {
     id: "huatulco",
@@ -109,6 +213,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -96.259,
     iata: "HUX",
     groundOnly: false,
+    region: "playa",
+    scenery: "pacifico",
+    avgTempC: 30,
+    highlights: ["9 Bahías", "La Entrega", "Parque Nacional"],
   },
   {
     id: "oaxaca",
@@ -119,6 +227,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -96.7266,
     iata: "OAX",
     groundOnly: false,
+    region: "cultura",
+    scenery: "colonial",
+    avgTempC: 25,
+    highlights: ["Santo Domingo", "Monte Albán", "Hierve el Agua"],
   },
   {
     id: "merida",
@@ -129,6 +241,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -89.5926,
     iata: "MID",
     groundOnly: false,
+    region: "cultura",
+    scenery: "colonial",
+    avgTempC: 31,
+    highlights: ["Paseo de Montejo", "Uxmal", "Cenotes de Homún"],
   },
   {
     id: "mazatlan",
@@ -139,6 +255,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -106.4111,
     iata: "MZT",
     groundOnly: false,
+    region: "playa",
+    scenery: "pacifico",
+    avgTempC: 28,
+    highlights: ["Centro Histórico", "Isla de la Piedra", "El Faro"],
   },
   {
     id: "ixtapa",
@@ -149,6 +269,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -101.552,
     iata: "ZIH",
     groundOnly: false,
+    region: "playa",
+    scenery: "pacifico",
+    avgTempC: 29,
+    highlights: ["Playa La Ropa", "Isla Ixtapa", "Paseo del Pescador"],
   },
   {
     id: "puerto-escondido",
@@ -159,6 +283,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -97.0767,
     iata: "PXM",
     groundOnly: false,
+    region: "playa",
+    scenery: "pacifico",
+    avgTempC: 30,
+    highlights: ["Carrizalillo", "Zicatela", "Laguna Manialtepec"],
   },
   {
     id: "cozumel",
@@ -169,6 +297,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -86.9223,
     iata: "CZM",
     groundOnly: false,
+    region: "playa",
+    scenery: "caribe",
+    avgTempC: 28,
+    highlights: ["Arrecife Palancar", "El Cielo", "Punta Sur"],
   },
   {
     id: "la-paz",
@@ -179,6 +311,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -110.3128,
     iata: "LAP",
     groundOnly: false,
+    region: "playa",
+    scenery: "desierto",
+    avgTempC: 27,
+    highlights: ["Playa Balandra", "Isla Espíritu Santo", "Malecón"],
   },
   {
     id: "guanajuato",
@@ -189,6 +325,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -101.686,
     iata: "BJX",
     groundOnly: false,
+    region: "cultura",
+    scenery: "colonial",
+    avgTempC: 23,
+    highlights: ["Teatro Juárez", "Callejón del Beso", "San Miguel cerca"],
   },
   {
     id: "puebla",
@@ -199,6 +339,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -98.2063,
     iata: "PBC",
     groundOnly: false,
+    region: "cultura",
+    scenery: "colonial",
+    avgTempC: 22,
+    highlights: ["Capilla del Rosario", "Cholula", "Callejón de los Sapos"],
   },
   {
     id: "queretaro",
@@ -209,6 +353,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -100.3899,
     iata: "QRO",
     groundOnly: false,
+    region: "cultura",
+    scenery: "colonial",
+    avgTempC: 24,
+    highlights: ["Los Arcos", "Peña de Bernal", "Ruta del Queso y Vino"],
   },
   {
     id: "campeche",
@@ -219,6 +367,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -90.5349,
     iata: "CPE",
     groundOnly: false,
+    region: "cultura",
+    scenery: "colonial",
+    avgTempC: 30,
+    highlights: ["Recinto Amurallado", "Edzná", "Calle 59"],
   },
   {
     id: "chihuahua",
@@ -229,6 +381,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -106.0889,
     iata: "CUU",
     groundOnly: false,
+    region: "ciudades",
+    scenery: "desierto",
+    avgTempC: 24,
+    highlights: ["Quinta Gameros", "Tren Chepe", "Barrancas del Cobre"],
   },
   {
     id: "tijuana",
@@ -239,6 +395,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -117.0382,
     iata: "TIJ",
     groundOnly: false,
+    region: "ciudades",
+    scenery: "metropoli",
+    avgTempC: 21,
+    highlights: ["CECUT", "Valle de Guadalupe", "Playas de Tijuana"],
   },
   {
     id: "aguascalientes",
@@ -249,6 +409,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -102.2916,
     iata: "AGU",
     groundOnly: false,
+    region: "cultura",
+    scenery: "colonial",
+    avgTempC: 24,
+    highlights: ["Jardín de San Marcos", "Museo Posada", "Calvillo"],
   },
   {
     id: "san-luis-potosi",
@@ -259,6 +423,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -100.9855,
     iata: "SLP",
     groundOnly: false,
+    region: "cultura",
+    scenery: "selva",
+    avgTempC: 24,
+    highlights: ["Plaza de Aranzazú", "Real de Catorce", "Huasteca Potosina"],
   },
   {
     id: "guadalajara",
@@ -269,6 +437,10 @@ export const DESTINATIONS: Destination[] = [
     lon: -103.3496,
     iata: "GDL",
     groundOnly: false,
+    region: "ciudades",
+    scenery: "colonial",
+    avgTempC: 26,
+    highlights: ["Hospicio Cabañas", "Tlaquepaque", "Ruta del Tequila"],
   },
   {
     id: "monterrey",
@@ -279,16 +451,24 @@ export const DESTINATIONS: Destination[] = [
     lon: -100.3161,
     iata: "MTY",
     groundOnly: false,
+    region: "ciudades",
+    scenery: "metropoli",
+    avgTempC: 27,
+    highlights: ["Parque Fundidora", "Paseo Santa Lucía", "Chipinque"],
   },
   {
     id: "cdmx",
     city: "Ciudad de México",
     state: "CDMX",
-    blurb: "Capital",
+    blurb: "Capital cultural y museos",
     lat: 19.4326,
     lon: -99.1332,
     iata: "MEX",
     groundOnly: false,
+    region: "ciudades",
+    scenery: "metropoli",
+    avgTempC: 22,
+    highlights: ["Chapultepec", "Coyoacán", "Centro Histórico"],
   },
 ];
 
