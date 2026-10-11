@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f6f1e8;
+  --bg-elev: #fffdf8;
+  --ink: #1a1814;
+  --muted: #5c574e;
+  --line: #e4d9c8;
+  --lagoon: #1f4d4a;
+  --lagoon-soft: #e5f0ec;
+  --clay: #c4653a;
+  --clay-ink: #fff8f3;
+  --knob: #fffdf8;
+  --good: #1f4d4a;
+  --warn: #8a5a12;
+  --shadow: 0 12px 40px rgb(26 24 20 / 8%);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #121614;
+  --bg-elev: #1c2420;
+  --ink: #f4efe6;
+  --muted: #b7b1a4;
+  --line: #31403a;
+  --lagoon: #8fcebb;
+  --lagoon-soft: #1a2e2b;
+  --clay: #e08a5d;
+  --clay-ink: #2a140c;
+  --knob: #121614;
+  --good: #b7d7a8;
+  --warn: #e7c27a;
+  --shadow: 0 16px 40px rgb(0 0 0 / 28%);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-elev: var(--bg-elev);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-lagoon: var(--lagoon);
+  --color-lagoon-soft: var(--lagoon-soft);
+  --color-clay: var(--clay);
+  --color-clay-ink: var(--clay-ink);
+  --color-knob: var(--knob);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --font-sans: "Outfit", system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --radius-card: 1.25rem;
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--lagoon);
+    outline-offset: 2px;
+  }
+
+  input,
+  select {
+    font: inherit;
+    color: var(--ink);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 220ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .switch-knob,
+  .press {
+    animation: none;
+    transition: none;
+  }
+}
+
+.press {
+  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.press:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.card-shadow {
+  box-shadow: var(--shadow);
+}
+
+.switch-knob {
+  transition: left 180ms ease, background-color 180ms ease;
+}

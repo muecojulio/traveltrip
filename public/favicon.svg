@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="TravelTrip">
+  <defs>
+    <clipPath id="tile">
+      <rect width="16" height="16" rx="3"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="16" height="16" fill="#F6F1E8"/>
+    <circle cx="8" cy="9" r="4" fill="#C4653A"/>
+    <rect y="9" width="16" height="7" fill="#1F4D4A"/>
+    <rect y="8" width="16" height="2" fill="#1A1814"/>
+  </g>
+</svg>
