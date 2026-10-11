@@ -1,10 +1,11 @@
-import { Link } from "@tanstack/react-router";
-import { Bookmark, Compass, Moon, Plane, ShieldCheck, SunMedium } from "lucide-react";
+import { Bookmark, Compass, Moon, Plane, QrCode, ShieldCheck, SunMedium } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionButton } from "@/components/interactions/action-button";
 import { LiveStatus } from "@/components/interactions/live-status";
 import { SectionTabBar, type SectionTabItem } from "@/components/interactions/section-tabs";
+import { InstallQrPanel } from "@/components/travel/install-qr-panel";
 import { HeroPanoramaSvg, PapelPicadoStrip } from "@/components/travel/mexican-art";
+import { PrivacyPanel } from "@/components/travel/privacy-panel";
 import { SavedPanel } from "@/components/travel/saved-panel";
 import { SearchPanel } from "@/components/travel/search-panel";
 import {
@@ -22,16 +23,22 @@ import { sectionPanelId, sectionTabId } from "@/lib/interactions/dom-ids";
 import { useActionFeedback } from "@/lib/interactions/use-action-feedback";
 import { usePanelSwipe } from "@/lib/interactions/use-panel-swipe";
 
-type Tab = "buscar" | "viaje" | "guardados";
+export type Tab = "buscar" | "viaje" | "guardados" | "instalar" | "privacidad";
 
 export const SAVED_KEY = "traveltrip-saved";
-const TAB_ORDER: Tab[] = ["buscar", "viaje", "guardados"];
+const TAB_ORDER: Tab[] = ["buscar", "viaje", "guardados", "instalar", "privacidad"];
 const ID_PREFIX = "section";
 
 const TABS: SectionTabItem[] = [
   { id: "buscar", label: "Buscar", icon: <Compass aria-hidden="true" className="size-5" /> },
   { id: "viaje", label: "Viaje", icon: <Plane aria-hidden="true" className="size-5" /> },
   { id: "guardados", label: "Guardados", icon: <Bookmark aria-hidden="true" className="size-5" /> },
+  { id: "instalar", label: "Instalar", icon: <QrCode aria-hidden="true" className="size-5" /> },
+  {
+    id: "privacidad",
+    label: "Privacidad",
+    icon: <ShieldCheck aria-hidden="true" className="size-5" />,
+  },
 ];
 
 /** Same Mexico City based defaults the app always used (server/client agree). */
@@ -48,8 +55,8 @@ function initialParams(): SearchParams {
   };
 }
 
-export function TravelApp() {
-  const [tab, setTab] = useState<Tab>("buscar");
+export function TravelApp({ initialTab = "buscar" }: { initialTab?: Tab } = {}) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [direction, setDirection] = useState<"forward" | "backward">("forward");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [themeReady, setThemeReady] = useState(false);
@@ -127,7 +134,11 @@ export function TravelApp() {
   function persist(next: Saved[]) {
     const safeNext = next.slice(0, 8);
     setSaved(safeNext);
-    localStorage.setItem(SAVED_KEY, JSON.stringify(safeNext));
+    if (safeNext.length === 0) {
+      localStorage.removeItem(SAVED_KEY);
+    } else {
+      localStorage.setItem(SAVED_KEY, JSON.stringify(safeNext));
+    }
   }
 
   async function executeSearch(forceRefresh = false): Promise<boolean> {
@@ -263,13 +274,6 @@ export function TravelApp() {
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <Link
-                to="/privacidad"
-                className="tap press lift hidden min-h-10 items-center gap-1.5 rounded-full border border-line bg-elev px-3 text-xs font-medium text-ink sm:inline-flex"
-              >
-                <ShieldCheck aria-hidden="true" className="size-3.5 text-lagoon" />
-                Privacidad
-              </Link>
               <ActionButton
                 size="icon"
                 variant="secondary"
@@ -368,6 +372,36 @@ export function TravelApp() {
                 onClear={() => persist([])}
                 onOpen={openSaved}
               />
+            </div>
+
+            <div
+              role="tabpanel"
+              id={sectionPanelId(ID_PREFIX, "instalar")}
+              aria-labelledby={sectionTabId(ID_PREFIX, "instalar")}
+              tabIndex={-1}
+              hidden={tab !== "instalar"}
+              ref={(node) => {
+                panelRefs.current.set("instalar", node);
+              }}
+              className={tab === "instalar" ? "panel-enter space-y-4" : undefined}
+              data-direction={direction}
+            >
+              <InstallQrPanel />
+            </div>
+
+            <div
+              role="tabpanel"
+              id={sectionPanelId(ID_PREFIX, "privacidad")}
+              aria-labelledby={sectionTabId(ID_PREFIX, "privacidad")}
+              tabIndex={-1}
+              hidden={tab !== "privacidad"}
+              ref={(node) => {
+                panelRefs.current.set("privacidad", node);
+              }}
+              className={tab === "privacidad" ? "panel-enter space-y-4" : undefined}
+              data-direction={direction}
+            >
+              <PrivacyPanel savedCount={saved.length} onClearSaved={() => persist([])} />
             </div>
           </div>
         </div>

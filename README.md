@@ -15,7 +15,8 @@ Cotizador visual de vacaciones en México: eliges destino, fechas, adultos y hot
   - Lista blanca estricta HTTPS anti-SSRF y lectura en streaming con tope de bytes (`readResponseBytesWithLimit`).
   - Limitación de tasa (`Rate Limiting`) por ventana deslizante.
   - Cabeceras HTTP de seguridad y sanitización de enlaces externos (`rel="noopener noreferrer"`).
-- **Política de Privacidad Integral (`/privacidad`):** Alineada con la LFPDPPP en México; incluye auditoría en vivo y botón para borrar todos los datos guardados en `localStorage`.
+- **Instalación Multiplataforma con Código QR (Pestaña «Instalar»):** Generador local de código QR (ISO/IEC 18004 en SVG, sin servicios externos) y guías interactivas paso a paso para instalar la aplicación en Android, iPhone, iPad, Windows, macOS, Linux y tablets.
+- **Política de Privacidad Integral (Pestaña «Privacidad»):** Alineada con la LFPDPPP en México; incluye auditoría en vivo y botón para borrar todos los datos guardados en `localStorage`.
 
 ## Fuentes sin llave
 
