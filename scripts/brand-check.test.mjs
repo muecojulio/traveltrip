@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,8 @@ import {
 } from "./brand-check.mjs";
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const OG_SKILL_REL = ".grok/skills/og/SKILL.md";
+const HAS_OG_SKILL = existsSync(join(TEMPLATE_ROOT, OG_SKILL_REL));
 const SCRIPT = join(TEMPLATE_ROOT, "scripts/brand-check.mjs");
 
 const GAME_SITE = JSON.stringify({ title: "Wild Race", type: "x:game", card: "custom" });
@@ -305,10 +307,12 @@ test("cli: a non-game with a compliant card passes", () => {
 
 const readDoc = (rel) => readFileSync(join(TEMPLATE_ROOT, rel), "utf8");
 
-test("SKILL.md and AGENTS.md name the marker path and bound this script uses", () => {
+test("available brand-task docs name the marker path and bound this script uses", () => {
   // Prose wraps, so the minute count may straddle a line break.
   const bound = new RegExp(`${OG_PENDING_MAX_AGE_MS / 60_000}\\s+minutes`);
-  for (const rel of [".grok/skills/og/SKILL.md", "AGENTS.md"]) {
+  const docs = [OG_SKILL_REL, "AGENTS.md"].filter((rel) => existsSync(join(TEMPLATE_ROOT, rel)));
+  assert.ok(docs.includes("AGENTS.md"), "the tracked agent instructions are available");
+  for (const rel of docs) {
     const doc = readDoc(rel);
     assert.ok(doc.includes(`/workspace/${OG_PENDING_REL_PATH}`), `${rel}: marker path`);
     assert.ok(bound.test(doc), `${rel}: staleness bound`);
@@ -331,7 +335,7 @@ const PROHIBITION_SECTIONS = [
     from: "6. **Brand-asset pass",
     until: /\n7\. /,
   },
-];
+].filter(({ rel }) => existsSync(join(TEMPLATE_ROOT, rel)));
 
 function prohibitionSection({ rel, label, from, until }) {
   const doc = readDoc(rel);
@@ -362,12 +366,20 @@ test("the sections that own the brand-task prohibition never affirm a wait", () 
   }
 });
 
-test("SKILL.md tells the pass to self-check with the flag this CLI accepts", () => {
-  const skill = readDoc(".grok/skills/og/SKILL.md");
-  const invocations = skill.match(/node scripts\/brand-check\.mjs[^\n`]*/g) ?? [];
-  assert.ok(invocations.length > 0);
-  for (const line of invocations) {
-    const argv = line.replace("node scripts/brand-check.mjs", "").trim().split(/\s+/);
-    assert.equal(parseBrandCheckArgs(argv.filter(Boolean)).error, undefined, line);
-  }
-});
+test(
+  "SKILL.md tells the pass to self-check with the flag this CLI accepts",
+  {
+    skip: HAS_OG_SKILL
+      ? false
+      : ".grok skill files are workspace-only and not present in this checkout",
+  },
+  () => {
+    const skill = readDoc(OG_SKILL_REL);
+    const invocations = skill.match(/node scripts\/brand-check\.mjs[^\n`]*/g) ?? [];
+    assert.ok(invocations.length > 0);
+    for (const line of invocations) {
+      const argv = line.replace("node scripts/brand-check.mjs", "").trim().split(/\s+/);
+      assert.equal(parseBrandCheckArgs(argv.filter(Boolean)).error, undefined, line);
+    }
+  },
+);

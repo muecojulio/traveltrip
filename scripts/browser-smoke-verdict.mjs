@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 export function normalizeBodyText(text) {
   return String(text ?? "")
     .replace(/\s+/g, " ")
@@ -10,11 +11,38 @@ export function normalizedBodyTextHash(text) {
 }
 
 const IDENTITY_PREFIX_LEN = 64;
+export const GROK_EXTENSION_SCRIPT_URL = "https://grok.com/grok-app-builder/extensions.js";
+
+/**
+ * The Arena sandbox can block the platform-injected extension at the network
+ * boundary. Keep reporting that request separately, but do not count its
+ * generic Chromium load-error text as an app-owned console error.
+ */
+export function filterConsoleErrors(consoleErrors, requestFailures = []) {
+  let expectedPlatformFailures = requestFailures.filter(
+    ({ url, errorText }) =>
+      url === GROK_EXTENSION_SCRIPT_URL && errorText === "net::ERR_CONNECTION_CLOSED",
+  ).length;
+  return consoleErrors.filter((message) => {
+    if (
+      expectedPlatformFailures > 0 &&
+      message === "Failed to load resource: net::ERR_CONNECTION_CLOSED"
+    ) {
+      expectedPlatformFailures -= 1;
+      return false;
+    }
+    return true;
+  });
+}
 
 export function bodyTextPrefix(text) {
   return normalizeBodyText(text).slice(0, IDENTITY_PREFIX_LEN);
 }
-export function parseSmokeArgs(argv, env = {}) {
+export function parseSmokeArgs(
+  argv,
+  env = {},
+  defaultOutPng = resolve(process.cwd(), "screenshots/app-builder-preview.png"),
+) {
   const positional = [];
   let baseline = env.BROWSER_SMOKE_BASELINE || "";
   for (let i = 0; i < argv.length; i++) {
@@ -35,7 +63,7 @@ export function parseSmokeArgs(argv, env = {}) {
   }
   return {
     url: positional[0] || "http://127.0.0.1:8080/",
-    outPng: positional[1] || "/workspace/screenshots/app-builder-preview.png",
+    outPng: positional[1] || defaultOutPng,
     baseline,
   };
 }

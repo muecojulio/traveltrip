@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
 import { computeBrandWarnings } from "./brand-check.mjs";
@@ -15,22 +16,28 @@ import {
   bodyTextPrefix,
   derivedPaths,
   exitCodeFor,
+  filterConsoleErrors,
+  GROK_EXTENSION_SCRIPT_URL,
   normalizeBodyText,
   normalizedBodyTextHash,
   parseSmokeArgs,
 } from "./browser-smoke-verdict.mjs";
 
-const args = parseSmokeArgs(process.argv.slice(2), process.env);
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(SCRIPT_DIR, "..");
+const SCREENSHOT_DIR = resolve(PROJECT_ROOT, "screenshots");
+const DEFAULT_OUTPUT_PNG = resolve(SCREENSHOT_DIR, "app-builder-preview.png");
+const args = parseSmokeArgs(process.argv.slice(2), process.env, DEFAULT_OUTPUT_PNG);
 if (args.error) {
   console.error(JSON.stringify({ ok: false, error: args.error }, null, 2));
   process.exit(1);
 }
 
 const url = checkedUrl(args.url);
-const outPng = checkedOutputPath(args.outPng, ["/workspace"]);
+const outPng = checkedOutputPath(args.outPng, [SCREENSHOT_DIR]);
 const derived = derivedPaths(outPng);
-const mobilePng = checkedOutputPath(derived.mobilePng, ["/workspace"]);
-const outJson = checkedOutputPath(derived.verdictJson, ["/workspace"], "verdict JSON");
+const mobilePng = checkedOutputPath(derived.mobilePng, [SCREENSHOT_DIR]);
+const outJson = checkedOutputPath(derived.verdictJson, [SCREENSHOT_DIR], "verdict JSON");
 
 const MAX_BASELINE_BYTES = 1024 * 1024;
 const baselineRequested = Boolean(args.baseline);
@@ -38,7 +45,7 @@ let baselinePath = null;
 let baselineResolveError = null;
 if (baselineRequested) {
   try {
-    baselinePath = checkedOutputPath(realpathSync(args.baseline), ["/workspace"], "baseline");
+    baselinePath = checkedOutputPath(realpathSync(args.baseline), [SCREENSHOT_DIR], "baseline");
   } catch (err) {
     baselineResolveError = err?.code ?? "unresolvable path";
   }
@@ -97,9 +104,16 @@ try {
 
   const viewports = {};
   for (const vp of VIEWPORTS) {
-    const errors = { consoleErrors: [], pageErrors: [] };
+    const errors = { consoleErrors: [], pageErrors: [], platformRequestFailures: [] };
     const page = await browser.newPage({
       viewport: { width: vp.width, height: vp.height },
+    });
+    page.on("requestfailed", (request) => {
+      if (request.url() !== GROK_EXTENSION_SCRIPT_URL) return;
+      errors.platformRequestFailures.push({
+        url: request.url(),
+        errorText: request.failure()?.errorText ?? "unknown",
+      });
     });
     page.on("console", (msg) => {
       if (msg.type() === "error") errors.consoleErrors.push(msg.text());
@@ -134,13 +148,17 @@ try {
       bodyTextHash: normalizedBodyTextHash(bodyText),
       bodyTextPrefix: bodyTextPrefix(bodyText),
       horizontalOverflow,
-      consoleErrors: errors.consoleErrors,
+      consoleErrors: filterConsoleErrors(errors.consoleErrors, errors.platformRequestFailures),
       pageErrors: errors.pageErrors,
+      platformRequestFailures: errors.platformRequestFailures,
       screenshot: vp.screenshot,
     };
   }
 
-  const brandWarnings = computeBrandWarnings({ hasCanvas: viewports.desktop.hasCanvas });
+  const brandWarnings = computeBrandWarnings({
+    hasCanvas: viewports.desktop.hasCanvas,
+    workspaceRoot: PROJECT_ROOT,
+  });
   // Only a dev server answers /__app-env, so smoking the built output reads as
   // indeterminate — report a divergence, never the absence of an observation.
   const authWarnings = authInvariantWarnings(
