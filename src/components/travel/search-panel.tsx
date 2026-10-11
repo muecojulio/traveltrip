@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router";
 import {
   CalendarDays,
   Check,
@@ -10,7 +9,6 @@ import {
   Plane,
   Plus,
   Search,
-  ShieldCheck,
   Sparkles,
   Sun,
   Users,
@@ -559,19 +557,6 @@ export function SearchPanel({
       >
         {`Cotizar ${activeDestination?.city ?? "viaje"} en vivo`}
       </ActionButton>
-
-      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-xs text-muted">
-        <span className="inline-flex items-center gap-1 text-lagoon">
-          <ShieldCheck aria-hidden="true" className="size-3.5" />
-          Caché anónima 5 min · Sin cuenta
-        </span>
-        <span>·</span>
-        <Link to="/privacidad" className="font-medium text-ink underline hover:text-clay">
-          Política de Privacidad
-        </Link>
-        <span>·</span>
-        <span>Se instala en la pantalla de inicio</span>
-      </div>
     </section>
   );
 }
