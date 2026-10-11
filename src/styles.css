@@ -50,6 +50,8 @@
   --font-sans: "Outfit", system-ui, sans-serif;
   --font-display: "Fraunces", Georgia, serif;
   --radius-card: 1.25rem;
+  /* One shared easing for every micro-interaction in the app. */
+  --ease-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @layer base {
@@ -59,6 +61,13 @@
     color: var(--ink);
     font-family: var(--font-sans);
     min-height: 100%;
+  }
+
+  /* Rails and reveals must never turn into a page-wide horizontal scroll. */
+  html,
+  body {
+    overflow-x: clip;
+    overscroll-behavior-x: none;
   }
 
   body {
@@ -74,17 +83,34 @@
     cursor: not-allowed;
   }
 
+  /* Native tap behaviour: no 300 ms delay, still zoomable. */
+  :where(a, button, [role="button"], [role="tab"], label, summary) {
+    touch-action: manipulation;
+  }
+
   :focus-visible {
     outline: 2px solid var(--lagoon);
     outline-offset: 2px;
   }
 
   input,
-  select {
+  select,
+  textarea {
     font: inherit;
     color: var(--ink);
   }
+
+  /* Keep disabled controls visually distinct and inert. */
+  :where(button, [role="button"])[disabled],
+  [aria-disabled="true"] {
+    opacity: 0.55;
+    pointer-events: none;
+  }
 }
+
+/* ------------------------------------------------------------------ */
+/* Motion primitives                                                   */
+/* ------------------------------------------------------------------ */
 
 @keyframes rise {
   from {
@@ -97,31 +123,362 @@
   }
 }
 
-.rise {
-  animation: rise 220ms ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rise,
-  .switch-knob,
-  .press {
-    animation: none;
-    transition: none;
+@keyframes panel-in-forward {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-.press {
-  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease;
+@keyframes panel-in-backward {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.press:active:not(:disabled) {
-  transform: scale(0.98);
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-2px);
+  }
+  75% {
+    transform: translateX(2px);
+  }
+}
+
+@keyframes rail-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 220ms var(--ease-soft);
+}
+
+/* Panels cross in from the direction the user came from, 200 ms, short travel. */
+.panel-enter {
+  animation: panel-in-forward 200ms var(--ease-soft) both;
+}
+
+.panel-enter[data-direction="backward"] {
+  animation-name: panel-in-backward;
+}
+
+.stagger > * {
+  animation: rise 240ms var(--ease-soft) both;
+}
+
+.stagger > *:nth-child(2) {
+  animation-delay: 45ms;
+}
+
+.stagger > *:nth-child(3) {
+  animation-delay: 90ms;
+}
+
+.stagger > *:nth-child(4) {
+  animation-delay: 135ms;
+}
+
+.stagger > *:nth-child(n + 5) {
+  animation-delay: 180ms;
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons and controls                                                */
+/* ------------------------------------------------------------------ */
+
+.tap {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.press {
+  transition:
+    transform 150ms var(--ease-soft),
+    background-color 150ms var(--ease-soft),
+    border-color 150ms var(--ease-soft),
+    color 150ms var(--ease-soft),
+    box-shadow 150ms var(--ease-soft);
+}
+
+/* Short, tangible press response; never triggered by a disabled control. */
+.press:active:not(:disabled):not([aria-disabled="true"]) {
+  transform: scale(0.97);
+  box-shadow: none;
+}
+
+/* Hover is a hint for mouse users only — never the signal that something is
+   interactive, and never applied on touch. */
+@media (hover: hover) and (pointer: fine) {
+  .lift:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgb(26 24 20 / 12%);
+  }
+
+  .action:hover:not(:disabled)[data-state="idle"] {
+    filter: brightness(1.04);
+  }
+}
+
+.action {
+  transition:
+    transform 150ms var(--ease-soft),
+    background-color 150ms var(--ease-soft),
+    border-color 150ms var(--ease-soft),
+    box-shadow 150ms var(--ease-soft),
+    filter 150ms var(--ease-soft);
+}
+
+/* Success confirms with a brief halo, error answers with a very small nudge
+   (never a colour-only signal: both states also swap the icon and the copy). */
+.action[data-state="success"] {
+  animation: rise 200ms var(--ease-soft);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--lagoon) 30%, transparent);
+}
+
+.action[data-state="error"] {
+  animation: nudge 240ms var(--ease-soft);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--warn) 28%, transparent);
+}
+
+.action:disabled {
+  box-shadow: none;
+}
+
+/* A confirmation still has to be readable on an already-disabled control
+   (for example "Guardar viaje" right after it saved). */
+.action[data-state="success"]:disabled,
+.action[data-state="error"]:disabled {
+  opacity: 1;
+}
+
+.field-control {
+  transition:
+    border-color 150ms var(--ease-soft),
+    box-shadow 150ms var(--ease-soft),
+    background-color 150ms var(--ease-soft);
+}
+
+.field-control:focus,
+.field-control:focus-visible {
+  border-color: var(--lagoon);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--lagoon) 24%, transparent);
+  outline: none;
+}
+
+.field-control[aria-invalid="true"] {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--warn) 20%, transparent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Switch                                                              */
+/* ------------------------------------------------------------------ */
+
+.switch-track {
+  transition:
+    background-color 180ms var(--ease-soft),
+    border-color 180ms var(--ease-soft);
+}
+
+.switch-knob {
+  transition: transform 180ms var(--ease-soft);
+}
+
+[role="switch"][aria-checked="true"] .switch-knob {
+  transform: translateX(20px);
+}
+
+/* ------------------------------------------------------------------ */
+/* Swipe to reveal                                                     */
+/* ------------------------------------------------------------------ */
+
+.swipe-surface {
+  /* Horizontal drags belong to the card, vertical ones to the page; pinch
+     zoom is always kept. */
+  touch-action: pan-y pinch-zoom;
+  transform: translateX(var(--reveal-x, 0px));
+  transition: transform 240ms var(--ease-soft);
+}
+
+.swipe-surface.is-dragging {
+  transition: none;
+}
+
+.swipe-actions {
+  z-index: 0;
+}
+
+.swipe-surface {
+  z-index: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Panel swipe between sections                                        */
+/* ------------------------------------------------------------------ */
+
+.panel-swipe {
+  transform: translateX(var(--panel-x, 0px));
+  transition: transform 220ms var(--ease-soft);
+}
+
+.panel-swipe.is-dragging {
+  transition: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Horizontal rails                                                    */
+/* ------------------------------------------------------------------ */
+
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.rail {
+  scroll-behavior: auto;
+}
+
+.rail:focus-visible {
+  outline: 2px solid var(--lagoon);
+  outline-offset: -2px;
+  border-radius: var(--radius-card);
+}
+
+/* Snapping lives on the items, published by the rail. */
+[data-rail][data-snap="center"] > * {
+  scroll-snap-align: center;
+}
+
+[data-rail][data-snap="start"] > * {
+  scroll-snap-align: start;
+}
+
+.rail-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.75rem;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.rail-fade-start {
+  left: 0;
+  background: linear-gradient(to right, var(--bg), transparent);
+}
+
+.rail-fade-end {
+  right: 0;
+  background: linear-gradient(to left, var(--bg), transparent);
+}
+
+.rail-hint {
+  position: absolute;
+  right: 0.25rem;
+  bottom: 0.5rem;
+  z-index: 3;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  pointer-events: none;
+  animation: rail-hint-in 260ms var(--ease-soft) 400ms both;
+}
+
+.tab-indicator {
+  will-change: transform, width;
+}
+
+/* ------------------------------------------------------------------ */
+/* Disclosure / combobox list                                          */
+/* ------------------------------------------------------------------ */
+
+.disclosure-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms var(--ease-soft);
+}
+
+.disclosure-panel[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+
+.option-row {
+  transition: background-color 120ms var(--ease-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .option-row:hover {
+    background: var(--lagoon-soft);
+  }
 }
 
 .card-shadow {
   box-shadow: var(--shadow);
 }
 
-.switch-knob {
-  transition: left 180ms ease, background-color 180ms ease;
+/* ------------------------------------------------------------------ */
+/* Reduced motion                                                      */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .press:active:not(:disabled),
+  .lift:hover:not(:disabled) {
+    transform: none;
+  }
+
+  .spin {
+    animation: none;
+  }
+
+  .rail-hint {
+    animation: none;
+  }
 }
