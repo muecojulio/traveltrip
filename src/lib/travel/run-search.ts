@@ -1,5 +1,12 @@
-import { getSql } from "@/lib/db";
 import { getFlightsFromFilter } from "google-flights-ts";
+import {
+  dedupeInFlight,
+  invalidateQuoteCacheMemory,
+  readQuoteCache,
+  readStaleQuoteCache,
+   withServiceCache,
+  writeQuoteCache,
+} from "./cache";
 import {
   AIRLINE_SITES,
   DESTINATIONS,
@@ -20,10 +27,19 @@ import {
   localizeGoogleFlight,
   parseFlightTime,
 } from "./flight-utils";
+import { isIsoCalendarDate, mexicoDate, money, nightsBetween } from "./format";
 import { parseGoogleHotels } from "./parse-hotels";
+import {
+  ALLOWED_FETCH_HOSTS,
+  PublicSearchError,
+  readResponseBytesWithLimit,
+  sanitizeCityName,
+  sanitizePlainText,
+  validateAllowedUrl,
+} from "./security";
 import type { Combo, FlightOffer, HotelOffer, Quote, WeatherDay } from "./types";
 
-export type SearchInput = {
+type SearchInput = {
   destinationId: string;
   customCity: string;
   originIata: string;
@@ -32,20 +48,14 @@ export type SearchInput = {
   adults: number;
   cabinOnly: boolean;
   arriveBy14: boolean;
+  forceRefresh?: boolean;
 };
-
-const HOSTS = new Set([
-  "www.google.com",
-  "mcp.octotrip.app",
-  "latest.currency-api.pages.dev",
-  "api.open-meteo.com",
-  "nominatim.openstreetmap.org",
-]);
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
 
 type Place = {
+  id: string;
   city: string;
   state: string;
   lat: number;
@@ -55,22 +65,6 @@ type Place = {
   groundOnly: boolean;
 };
 
-function todayMx(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
-}
-
-function nightsBetween(a: string, b: string): number {
-  const start = Date.parse(`${a}T00:00:00Z`);
-  const end = Date.parse(`${b}T00:00:00Z`);
-  return Math.round((end - start) / 86_400_000);
-}
-
-function isIsoCalendarDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value;
-}
-
 function pesos(value: number): number {
   return Math.round(value);
 }
@@ -79,6 +73,7 @@ function httpsLink(href: string, hosts: string[]): string | null {
   try {
     const url = new URL(href);
     if (url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
     if (!hosts.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))) {
       return null;
     }
@@ -94,65 +89,75 @@ async function fetchAllowed(
   maxBytes: number,
   timeoutMs = 14_000,
 ): Promise<{ status: number; text: string; finalUrl: string }> {
-  const target = new URL(url);
-  if (target.protocol !== "https:" || !HOSTS.has(target.hostname)) {
-    throw new Error("Fuente no permitida");
-  }
+  const target = validateAllowedUrl(url, ALLOWED_FETCH_HOSTS);
   const response = await fetch(target, {
     ...init,
     redirect: "follow",
     signal: AbortSignal.timeout(timeoutMs),
   });
-  const finalHost = new URL(response.url).hostname;
-  if (!HOSTS.has(finalHost)) throw new Error("La fuente redirigió fuera de la lista permitida");
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > maxBytes) throw new Error("Respuesta demasiado grande");
+  validateAllowedUrl(response.url, ALLOWED_FETCH_HOSTS);
+  const bytes = await readResponseBytesWithLimit(response, maxBytes);
   return {
     status: response.status,
-    text: new TextDecoder().decode(buffer),
+    text: new TextDecoder().decode(bytes),
     finalUrl: response.url,
   };
 }
 
 async function usdMxnRate(): Promise<number | null> {
-  try {
-    const res = await fetchAllowed(
-      "https://latest.currency-api.pages.dev/v1/currencies/usd.min.json",
-      { headers: { accept: "application/json" } },
-      400_000,
-    );
-    if (res.status !== 200) return null;
-    const data = JSON.parse(res.text) as { usd?: { mxn?: number } };
-    const rate = data.usd?.mxn;
-    if (typeof rate !== "number" || rate < 8 || rate > 40) return null;
-    return rate;
-  } catch {
-    return null;
-  }
+  return withServiceCache<number>("fx:usd_mxn", "fx", 30 * 60, async () => {
+    try {
+      const res = await fetchAllowed(
+        "https://latest.currency-api.pages.dev/v1/currencies/usd.min.json",
+        { headers: { accept: "application/json" } },
+        400_000,
+      );
+      if (res.status !== 200) return null;
+      const data = JSON.parse(res.text) as { usd?: { mxn?: number } };
+      const rate = data.usd?.mxn;
+      if (typeof rate !== "number" || rate < 8 || rate > 40) return null;
+      return rate;
+    } catch {
+      return null;
+    }
+  });
 }
 
 async function geocode(city: string): Promise<{ lat: number; lon: number } | null> {
-  const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("q", `${city}, Mexico`);
-  url.searchParams.set("format", "json");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("countrycodes", "mx");
-  try {
-    const res = await fetchAllowed(url.toString(), {
-      headers: {
-        accept: "application/json",
-        "user-agent": "TravelTrip/1.0 (vacation compare; https://github.com/muecojulio/traveltrip)",
-      },
-    }, 200_000);
-    if (res.status !== 200) return null;
-    const rows = JSON.parse(res.text) as { lat?: string; lon?: string }[];
-    const lat = Number(rows[0]?.lat);
-    const lon = Number(rows[0]?.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-    return { lat, lon };
-  } catch {
-    return null;
-  }
+  const normalizedKey = `geo:${city.toLowerCase().trim()}`;
+  return withServiceCache<{ lat: number; lon: number }>(
+    normalizedKey,
+    "geo",
+    7 * 24 * 60 * 60,
+    async () => {
+      const url = new URL("https://nominatim.openstreetmap.org/search");
+      url.searchParams.set("q", `${city}, Mexico`);
+      url.searchParams.set("format", "json");
+      url.searchParams.set("limit", "1");
+      url.searchParams.set("countrycodes", "mx");
+      try {
+        const res = await fetchAllowed(
+          url.toString(),
+          {
+            headers: {
+              accept: "application/json",
+              "user-agent":
+                "TravelTrip/1.0 (vacation compare; https://github.com/muecojulio/traveltrip)",
+            },
+          },
+          200_000,
+        );
+        if (res.status !== 200) return null;
+        const rows = JSON.parse(res.text) as { lat?: string; lon?: string }[];
+        const lat = Number(rows[0]?.lat);
+        const lon = Number(rows[0]?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        return { lat, lon };
+      } catch {
+        return null;
+      }
+    },
+  );
 }
 
 function weatherLabel(code: number | null): string {
@@ -168,35 +173,49 @@ function weatherLabel(code: number | null): string {
   return "Variable";
 }
 
-async function weather(lat: number, lon: number, checkIn: string, checkOut: string): Promise<WeatherDay[]> {
-  const url = new URL("https://api.open-meteo.com/v1/forecast");
-  url.searchParams.set("latitude", String(lat));
-  url.searchParams.set("longitude", String(lon));
-  url.searchParams.set("daily", "weather_code,temperature_2m_max,temperature_2m_min");
-  url.searchParams.set("timezone", "America/Mexico_City");
-  url.searchParams.set("start_date", checkIn);
-  url.searchParams.set("end_date", checkOut);
-  try {
-    const res = await fetchAllowed(url.toString(), { headers: { accept: "application/json" } }, 200_000);
-    if (res.status !== 200) return [];
-    const data = JSON.parse(res.text) as {
-      daily?: {
-        time?: string[];
-        weather_code?: number[];
-        temperature_2m_max?: number[];
-        temperature_2m_min?: number[];
+async function weather(
+  lat: number,
+  lon: number,
+  checkIn: string,
+  checkOut: string,
+): Promise<WeatherDay[]> {
+  const weatherKey = `weather:${lat.toFixed(2)}:${lon.toFixed(2)}:${checkIn}:${checkOut}`;
+  const cached = await withServiceCache<WeatherDay[]>(weatherKey, "weather", 30 * 60, async () => {
+    const url = new URL("https://api.open-meteo.com/v1/forecast");
+    url.searchParams.set("latitude", String(lat));
+    url.searchParams.set("longitude", String(lon));
+    url.searchParams.set("daily", "weather_code,temperature_2m_max,temperature_2m_min");
+    url.searchParams.set("timezone", "America/Mexico_City");
+    url.searchParams.set("start_date", checkIn);
+    url.searchParams.set("end_date", checkOut);
+    try {
+      const res = await fetchAllowed(
+        url.toString(),
+        { headers: { accept: "application/json" } },
+        200_000,
+      );
+      if (res.status !== 200) return null;
+      const data = JSON.parse(res.text) as {
+        daily?: {
+          time?: string[];
+          weather_code?: number[];
+          temperature_2m_max?: number[];
+          temperature_2m_min?: number[];
+        };
       };
-    };
-    const days = data.daily?.time ?? [];
-    return days.slice(0, 5).map((date, index) => ({
-      date,
-      label: weatherLabel(data.daily?.weather_code?.[index] ?? null),
-      max: data.daily?.temperature_2m_max?.[index] ?? null,
-      min: data.daily?.temperature_2m_min?.[index] ?? null,
-    }));
-  } catch {
-    return [];
-  }
+      const days = data.daily?.time ?? [];
+      if (days.length === 0) return null;
+      return days.slice(0, 5).map((date, index) => ({
+        date,
+        label: weatherLabel(data.daily?.weather_code?.[index] ?? null),
+        max: data.daily?.temperature_2m_max?.[index] ?? null,
+        min: data.daily?.temperature_2m_min?.[index] ?? null,
+      }));
+    } catch {
+      return null;
+    }
+  });
+  return cached ?? [];
 }
 
 type RawFlight = {
@@ -238,23 +257,18 @@ function displayFlightTime(value: string): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
+const GOOGLE_ONLY_HOST = new Set(["www.google.com"]);
+
 async function fetchGoogleFlightsPage(url: string, init?: RequestInit): Promise<Response> {
-  const target = new URL(url);
-  if (target.protocol !== "https:" || target.hostname !== "www.google.com") {
-    throw new Error("Google Flights intentó consultar un host no permitido.");
-  }
+  const target = validateAllowedUrl(url, GOOGLE_ONLY_HOST);
   const response = await fetch(target, {
     ...init,
     redirect: "follow",
     signal: AbortSignal.timeout(12_000),
   });
-  const finalHost = new URL(response.url).hostname;
-  if (finalHost !== "www.google.com") throw new Error("Google Flights redirigió fuera de su sitio.");
-  const contentLength = Number(response.headers.get("content-length") ?? 0);
-  if (contentLength > 5_000_000) throw new Error("La página de vuelos superó el límite de tamaño.");
-  const body = await response.arrayBuffer();
-  if (body.byteLength > 5_000_000) throw new Error("La página de vuelos superó el límite de tamaño.");
-  return new Response(body, {
+  validateAllowedUrl(response.url, GOOGLE_ONLY_HOST);
+  const bytes = await readResponseBytesWithLimit(response, 5_000_000);
+  return new Response(bytes.buffer as ArrayBuffer, {
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
@@ -326,7 +340,9 @@ async function searchGoogleFlights(input: SearchInput, place: Place): Promise<Fl
   });
   if (!result || !("flights" in result)) return [];
   return result.flights
-    .map((flight) => localizeGoogleFlight(flight, input, place.iata as string, googleLink, despegarLink))
+    .map((flight) =>
+      localizeGoogleFlight(flight, input, place.iata as string, googleLink, despegarLink),
+    )
     .filter((flight): flight is FlightOffer => flight !== null);
 }
 
@@ -340,26 +356,37 @@ function octotripOffer(
   despegarLink: string,
 ): FlightOffer | null {
   const outbound = raw.outbound;
+  const airlineName = sanitizePlainText(raw.airline ?? "", 80);
   if (
     !outbound?.arrival_time ||
     !outbound.departure_time ||
     typeof raw.price !== "number" ||
-    !raw.airline
+    !airlineName
   ) {
     return null;
   }
   const priceMxn = toMxn(raw.price, raw.currency ?? "MXN", rate);
   const arrivalMinutes = parseFlightTime(outbound.arrival_time);
   const departureTime = displayFlightTime(outbound.departure_time);
-  if (priceMxn == null || arrivalMinutes == null || parseFlightTime(outbound.departure_time) == null) return null;
+  if (
+    priceMxn == null ||
+    arrivalMinutes == null ||
+    parseFlightTime(outbound.departure_time) == null
+  ) {
+    return null;
+  }
 
   const arrivalTime = displayFlightTime(outbound.arrival_time);
-  const arrivalDate = outbound.arrival_date ?? "";
+  const arrivalDate = sanitizePlainText(outbound.arrival_date ?? "", 16);
   const sameDay = arrivalDate === input.checkIn;
   const arrivesBy14 = sameDay && arrivalMinutes <= 14 * 60;
-  const cabin = cabinBagIncluded(raw.baggage ?? "");
-  const code = (raw.airline_code ?? airlineCodeFromName(raw.airline)).toUpperCase();
-  const airlineSite = airlineUrl(raw.airline, code);
+  const baggage = sanitizePlainText(raw.baggage ?? "", 140);
+  const cabin = cabinBagIncluded(baggage);
+  const code = sanitizePlainText(
+    raw.airline_code ?? airlineCodeFromName(airlineName),
+    8,
+  ).toUpperCase();
+  const airlineSite = airlineUrl(airlineName, code);
   const live = raw.booking_url ? httpsLink(raw.booking_url, ["mcp.octotrip.app"]) : null;
   const links = [
     live ? { label: "Tarifa en vivo", href: live } : null,
@@ -378,26 +405,33 @@ function octotripOffer(
     );
   }
   if (input.cabinOnly && cabin !== true) {
-    reasons.push(cabin === false ? "La tarifa no incluye maleta de mano" : "La tarifa no confirma maleta de mano");
+    reasons.push(
+      cabin === false
+        ? "La tarifa no incluye maleta de mano"
+        : "La tarifa no confirma maleta de mano",
+    );
   }
   return {
     id: `${code || "airline"}-${index}-${departureTime}-${arrivalTime}`,
-    airline: raw.airline,
+    airline: airlineName,
     airlineCode: code,
-    numbers: raw.flight_numbers ?? [],
+    numbers: (raw.flight_numbers ?? []).slice(0, 4).map((n) => sanitizePlainText(n, 20)),
     priceMxn: pesos(priceMxn),
     cabinIncluded: cabin,
-    baggage: raw.baggage ?? "",
+    baggage,
     arrivalTime,
     arrivalDate,
     departureTime,
-    departureAirport: outbound.departure ?? input.originIata,
-    arrivalAirport: outbound.arrival ?? place.iata ?? place.city,
+    departureAirport: sanitizePlainText(outbound.departure ?? input.originIata, 10),
+    arrivalAirport: sanitizePlainText(outbound.arrival ?? place.iata ?? place.city, 20),
     sameDay,
     arrivesBy14,
     direct: Boolean(raw.is_direct) || raw.stops === 0,
-    durationMinutes: outbound.duration_minutes ?? null,
-    gate: raw.gate ?? "",
+    durationMinutes:
+      typeof outbound.duration_minutes === "number" && outbound.duration_minutes > 0
+        ? Math.round(outbound.duration_minutes)
+        : null,
+    gate: sanitizePlainText(raw.gate ?? "", 40),
     source: "OctoTrip",
     qualifies: reasons.length === 0,
     rejectReason: reasons.length ? reasons.join(". ") : null,
@@ -429,7 +463,11 @@ function dedupeFlights(flights: FlightOffer[]): FlightOffer[] {
   return [...unique.values()];
 }
 
-async function searchFlights(input: SearchInput, place: Place, rate: number | null): Promise<{
+async function searchFlights(
+  input: SearchInput,
+  place: Place,
+  rate: number | null,
+): Promise<{
   flights: FlightOffer[];
   others: FlightOffer[];
   hidden: number;
@@ -527,13 +565,15 @@ async function searchHotels(
   } catch {
     return {
       hotels: [],
-      notice: "No se pudieron leer precios de hotel en este momento. Abre Booking o Despegar con tus fechas.",
+      notice:
+        "No se pudieron leer precios de hotel en este momento. Abre Booking o Despegar con tus fechas.",
     };
   }
   if (parsed.length === 0) {
     return {
       hotels: [],
-      notice: "Google Hotels no publicó tarifas legibles para esas fechas. Abre Booking o Despegar para consultar disponibilidad.",
+      notice:
+        "Google Hotels no publicó tarifas legibles para esas fechas. Abre Booking o Despegar para consultar disponibilidad.",
     };
   }
 
@@ -542,12 +582,13 @@ async function searchHotels(
   if (usable.length === 0) {
     return {
       hotels: [],
-      notice: "Google Hotels devolvió precios en USD y no se pudo consultar el tipo de cambio; no mostramos un total MXN incorrecto.",
+      notice:
+        "Google Hotels devolvió precios en USD y no se pudo consultar el tipo de cambio; no mostramos un total MXN incorrecto.",
     };
   }
 
   const hotels: HotelOffer[] = usable.map((hotel) => {
-    const factor = hotel.currency === "USD" ? rate as number : 1;
+    const factor = hotel.currency === "USD" ? (rate as number) : 1;
     const perNightMxn = hotel.perNight * factor;
     const stayTotalMxn = hotel.stayTotal * factor;
     const booking = new URL("https://www.booking.com/searchresults.es.html");
@@ -586,7 +627,9 @@ async function searchHotels(
       links: [
         { label: "Booking", href: booking.toString() },
         { label: "Despegar", href: despegar.toString() },
-        google ? { label: "Google Hotels", href: google } : { label: "Google Hotels", href: url.toString() },
+        google
+          ? { label: "Google Hotels", href: google }
+          : { label: "Google Hotels", href: url.toString() },
         { label: "Buscar sitio oficial", href: official.toString() },
       ],
     };
@@ -614,9 +657,7 @@ function buildCombos(
   const combos: Combo[] = hotels.slice(0, 5).map((hotel) => {
     const flightMxn = flight?.priceMxn ?? 0;
     const total = hotel.stayTotalMxn + flightMxn;
-    const flightLabel = flight
-      ? `${flight.airline} ${flight.numbers[0] ?? ""}`.trim()
-      : null;
+    const flightLabel = flight ? `${flight.airline} ${flight.numbers[0] ?? ""}`.trim() : null;
     return {
       hotelName: hotel.name,
       hotelMxn: hotel.stayTotalMxn,
@@ -652,21 +693,14 @@ function buildCombos(
   return { best, alternatives: combos.slice(1, 4) };
 }
 
-function money(value: number): string {
-  return new Intl.NumberFormat("es-MX", {
-    style: "currency",
-    currency: "MXN",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
 async function resolvePlace(input: SearchInput): Promise<Place> {
   const origin = ORIGINS.find((item) => item.iata === input.originIata);
-  if (!origin) throw new Error("Elige un aeropuerto de salida.");
+  if (!origin) throw new PublicSearchError("Elige un aeropuerto de salida.");
   if (input.destinationId !== "custom") {
     const dest = findDestination(input.destinationId);
-    if (!dest) throw new Error("Elige un destino de la lista.");
+    if (!dest) throw new PublicSearchError("Elige un destino de la lista.");
     return {
+      id: dest.id,
       city: dest.city,
       state: dest.state,
       lat: dest.lat,
@@ -677,7 +711,10 @@ async function resolvePlace(input: SearchInput): Promise<Place> {
     };
   }
 
-  const city = input.customCity.trim();
+  const city = sanitizeCityName(input.customCity);
+  if (city.length < 3) {
+    throw new PublicSearchError("Escribe al menos tres letras para la ciudad.");
+  }
   const normalize = (value: string) =>
     value
       .normalize("NFD")
@@ -688,6 +725,7 @@ async function resolvePlace(input: SearchInput): Promise<Place> {
   const known = DESTINATIONS.find((dest) => normalize(dest.city) === normalize(city));
   if (known) {
     return {
+      id: known.id,
       city: known.city,
       state: known.state,
       lat: known.lat,
@@ -700,8 +738,13 @@ async function resolvePlace(input: SearchInput): Promise<Place> {
 
   const ground = groundByName(city);
   const geo = await geocode(city);
-  if (!geo) throw new Error(`No pudimos ubicar ${city} en México. Revisa el nombre del destino.`);
+  if (!geo) {
+    throw new PublicSearchError(
+      `No pudimos ubicar ${city} en México. Revisa el nombre del destino.`,
+    );
+  }
   return {
+    id: `custom:${normalize(city)}`,
     city,
     state: "México",
     lat: geo.lat,
@@ -727,160 +770,167 @@ function cacheKey(input: SearchInput, place: Place): string {
   ].join("|");
 }
 
-async function readCache(key: string): Promise<Quote | null> {
-  try {
-    const sql = await getSql();
-    const rows = await sql<{ payload: string }>`
-      select payload from quote_cache
-      where cache_key = ${key}
-        and fetched_at > now() - interval '5 minutes'
-    `;
-    const payload = rows[0]?.payload;
-    if (!payload) return null;
-    const quote = JSON.parse(payload) as Quote;
-    return { ...quote, cached: true };
-  } catch {
-    return null;
-  }
-}
-
-async function writeCache(key: string, quote: Quote): Promise<void> {
-  try {
-    const sql = await getSql();
-    const payload = JSON.stringify({ ...quote, cached: false });
-    await sql`
-      insert into quote_cache (cache_key, payload, fetched_at)
-      values (${key}, ${payload}, now())
-      on conflict (cache_key) do update
-        set payload = excluded.payload, fetched_at = now()
-    `;
-    await sql`
-      delete from quote_cache
-      where fetched_at < now() - interval '2 days'
-    `;
-  } catch {
-    // Search still works if the cache is down.
-  }
-}
-
 export async function runSearch(input: SearchInput): Promise<Quote> {
-  const today = todayMx();
+  const today = mexicoDate(0);
   if (!isIsoCalendarDate(input.checkIn) || !isIsoCalendarDate(input.checkOut)) {
-    throw new Error("Fechas inválidas.");
+    throw new PublicSearchError("Fechas inválidas.");
   }
-  if (input.checkIn < today) throw new Error("La llegada no puede ser anterior a hoy.");
+  if (input.checkIn < today) {
+    throw new PublicSearchError("La llegada no puede ser anterior a hoy.");
+  }
   const nights = nightsBetween(input.checkIn, input.checkOut);
-  if (nights < 1) throw new Error("La salida tiene que ser después de la llegada.");
-  if (nights > 14) throw new Error("Por ahora la búsqueda cubre hasta 14 noches.");
+  if (nights < 1) throw new PublicSearchError("La salida tiene que ser después de la llegada.");
+  if (nights > 14) throw new PublicSearchError("Por ahora la búsqueda cubre hasta 14 noches.");
   if (input.destinationId === "custom" && input.customCity.trim().length < 3) {
-    throw new Error("Escribe la ciudad.");
+    throw new PublicSearchError("Escribe la ciudad.");
   }
   if (!ORIGINS.some((origin) => origin.iata === input.originIata)) {
-    throw new Error("Elige un aeropuerto de salida.");
+    throw new PublicSearchError("Elige un aeropuerto de salida.");
   }
 
   const place = await resolvePlace(input);
   const key = cacheKey(input, place);
-  const cached = await readCache(key);
-  if (cached) return cached;
 
-  const rate = await usdMxnRate();
-  const [hotelResult, flightResult, sky] = await Promise.all([
-    searchHotels(place, input, rate),
-    searchFlights(input, place, rate),
-    weather(place.lat, place.lon, input.checkIn, input.checkOut),
-  ]);
-
-  const { best, alternatives } = buildCombos(hotelResult.hotels, flightResult.flights, place);
-  const origin = ORIGINS.find((item) => item.iata === input.originIata);
-  const notices = [hotelResult.notice, flightResult.notice].filter((item): item is string => Boolean(item));
-  if (place.groundOnly) {
-    notices.unshift("Cuernavaca, Veracruz y Acapulco se cotizan sin vuelo; el total es solo hotel.");
-  } else if (!place.flightMode) {
-    notices.unshift("No se suma vuelo porque sales desde la misma zona aeroportuaria del destino.");
-  } else if (flightResult.flights.length === 0 && flightResult.others.length > 0) {
-    const sample = flightResult.others[0];
-    notices.push(
-      `No hay una tarifa que cumpla todos los filtros activos. La más barata publicada es ${sample.airline} a las ${sample.arrivalTime}: ${sample.rejectReason ?? "revisa el equipaje y la hora"}.`,
-    );
-  } else if (flightResult.hidden > 0) {
-    notices.push(`${flightResult.hidden} tarifas adicionales no se muestran para mantener la lista breve.`);
-  }
-  notices.push(
-    "El precio de hotel se lee de Google Hotels; Booking y Despegar se abren con tus fechas porque no ofrecen una lectura pública fiable de sus tarifas desde esta app. Los importes son orientativos: confirma impuestos, disponibilidad y precio final en el sitio antes de reservar.",
-  );
-  if (place.flightMode) {
-    notices.push(
-      "El vuelo es de ida y vuelta para el grupo seleccionado. La maleta de mano solo se cuenta como incluida cuando la fuente lo confirma; los resultados de Google Flights pueden requerir verificación de tarifa en la aerolínea.",
-    );
-  }
-  if (input.adults !== 2) {
-    notices.push(
-      "Se envió el número de adultos elegido a las búsquedas; verifica la ocupación y el total final en la página del hotel.",
-    );
+  if (input.forceRefresh) {
+    invalidateQuoteCacheMemory(key);
+  } else {
+    const cached = await readQuoteCache(key);
+    if (cached) return cached;
   }
 
-  const bookingCity = new URL("https://www.booking.com/searchresults.es.html");
-  bookingCity.searchParams.set("ss", place.city);
-  bookingCity.searchParams.set("checkin", input.checkIn);
-  bookingCity.searchParams.set("checkout", input.checkOut);
-  bookingCity.searchParams.set("group_adults", String(input.adults));
-  bookingCity.searchParams.set("no_rooms", "1");
-  bookingCity.searchParams.set("selected_currency", "MXN");
+  return dedupeInFlight(`quote:${key}:${input.forceRefresh ? "refresh" : "std"}`, async () => {
+    const rate = await usdMxnRate();
+    const [hotelResult, flightResult, sky] = await Promise.all([
+      searchHotels(place, input, rate),
+      searchFlights(input, place, rate),
+      weather(place.lat, place.lon, input.checkIn, input.checkOut),
+    ]);
 
-  const despegarHotel = new URL("https://www.despegar.com.mx/hoteles/");
-  despegarHotel.searchParams.set("q", place.city);
-  despegarHotel.searchParams.set("checkin", input.checkIn);
-  despegarHotel.searchParams.set("checkout", input.checkOut);
-  despegarHotel.searchParams.set("adults", String(input.adults));
-  const cityLinks: { label: string; href: string }[] = [
-    { label: "Booking hoteles", href: bookingCity.toString() },
-    { label: "Despegar hoteles", href: despegarHotel.toString() },
-  ];
-  if (place.flightMode) {
-    cityLinks.push(
-      place.iata
-        ? { label: "Google Flights", href: googleFlightsUrl(input, place.iata) }
-        : { label: "Buscar vuelos", href: googleFlightsCitySearchUrl(input, place.city) },
-    );
-    if (place.iata) {
-      cityLinks.push({ label: "Despegar vuelos", href: despegarFlightUrl(input, place.iata) });
-    } else {
-      const despegarSearch = new URL("https://www.despegar.com.mx/shop/flights/");
-      despegarSearch.searchParams.set("q", `${input.originIata} ${place.city} ${input.checkIn}`);
-      cityLinks.push({ label: "Buscar vuelos en Despegar", href: despegarSearch.toString() });
+    // Stale-while-error fallback: if live external providers returned no data at all,
+    // recover a recent snapshot (up to 30 min old) if available.
+    const bothEmpty =
+      hotelResult.hotels.length === 0 &&
+      flightResult.flights.length === 0 &&
+      flightResult.others.length === 0;
+    if (bothEmpty && !input.forceRefresh) {
+      const stale = await readStaleQuoteCache(key);
+      if (stale) {
+        return {
+          ...stale,
+          cached: true,
+          notices: [
+            "Se mostró una copia reciente en caché porque los proveedores tardaron en responder en vivo.",
+            ...stale.notices,
+          ],
+        };
+      }
     }
-    for (const airline of MEXICAN_AIRLINES) {
-      const href = AIRLINE_SITES[airline.code];
-      if (href) cityLinks.push({ label: airline.label, href });
-    }
-  }
 
-  const quote: Quote = {
-    place: place.city,
-    state: place.state,
-    checkIn: input.checkIn,
-    checkOut: input.checkOut,
-    nights,
-    adults: input.adults,
-    originLabel: place.flightMode && origin ? `${origin.city} · ${origin.airport}` : null,
-    flightMode: place.flightMode,
-    hotels: hotelResult.hotels,
-    flights: flightResult.flights,
-    otherFlights: flightResult.others,
-    hiddenFlights: flightResult.hidden,
-    best,
-    alternatives,
-    weather: sky,
-    usdMxn: rate,
-    notices,
-    fetchedAt: new Date().toISOString(),
-    cached: false,
-    cityLinks,
-  };
-  if (quote.hotels.length > 0 || quote.flights.length > 0 || quote.otherFlights.length > 0) {
-    const flightMissed = quote.flightMode && quote.flights.length === 0 && quote.otherFlights.length === 0;
-    if (!flightMissed) await writeCache(key, quote);
-  }
-  return quote;
+    const { best, alternatives } = buildCombos(hotelResult.hotels, flightResult.flights, place);
+    const origin = ORIGINS.find((item) => item.iata === input.originIata);
+    const notices = [hotelResult.notice, flightResult.notice].filter((item): item is string =>
+      Boolean(item),
+    );
+    if (place.groundOnly) {
+      notices.unshift(
+        "Cuernavaca, Veracruz y Acapulco se cotizan sin vuelo; el total es solo hotel.",
+      );
+    } else if (!place.flightMode) {
+      notices.unshift("No se suma vuelo porque sales desde la misma zona aeroportuaria del destino.");
+    } else if (flightResult.flights.length === 0 && flightResult.others.length > 0) {
+      const sample = flightResult.others[0];
+      notices.push(
+        `No hay una tarifa que cumpla todos los filtros activos. La más barata publicada es ${sample.airline} a las ${sample.arrivalTime}: ${sample.rejectReason ?? "revisa el equipaje y la hora"}.`,
+      );
+    } else if (flightResult.hidden > 0) {
+      notices.push(
+        `${flightResult.hidden} tarifas adicionales no se muestran para mantener la lista breve.`,
+      );
+    }
+    notices.push(
+      "El precio de hotel se lee de Google Hotels; Booking y Despegar se abren con tus fechas porque no ofrecen una lectura pública fiable de sus tarifas desde esta app. Los importes son orientativos: confirma impuestos, disponibilidad y precio final en el sitio antes de reservar.",
+    );
+    if (place.flightMode) {
+      notices.push(
+        "El vuelo es de ida y vuelta para el grupo seleccionado. La maleta de mano solo se cuenta como incluida cuando la fuente lo confirma; los resultados de Google Flights pueden requerir verificación de tarifa en la aerolínea.",
+      );
+    }
+    if (input.adults !== 2) {
+      notices.push(
+        "Se envió el número de adultos elegido a las búsquedas; verifica la ocupación y el total final en la página del hotel.",
+      );
+    }
+
+    const bookingCity = new URL("https://www.booking.com/searchresults.es.html");
+    bookingCity.searchParams.set("ss", place.city);
+    bookingCity.searchParams.set("checkin", input.checkIn);
+    bookingCity.searchParams.set("checkout", input.checkOut);
+    bookingCity.searchParams.set("group_adults", String(input.adults));
+    bookingCity.searchParams.set("no_rooms", "1");
+    bookingCity.searchParams.set("selected_currency", "MXN");
+
+    const despegarHotel = new URL("https://www.despegar.com.mx/hoteles/");
+    despegarHotel.searchParams.set("q", place.city);
+    despegarHotel.searchParams.set("checkin", input.checkIn);
+    despegarHotel.searchParams.set("checkout", input.checkOut);
+    despegarHotel.searchParams.set("adults", String(input.adults));
+    const cityLinks: { label: string; href: string }[] = [
+      { label: "Booking hoteles", href: bookingCity.toString() },
+      { label: "Despegar hoteles", href: despegarHotel.toString() },
+    ];
+    if (place.flightMode) {
+      cityLinks.push(
+        place.iata
+          ? { label: "Google Flights", href: googleFlightsUrl(input, place.iata) }
+          : { label: "Buscar vuelos", href: googleFlightsCitySearchUrl(input, place.city) },
+      );
+      if (place.iata) {
+        cityLinks.push({ label: "Despegar vuelos", href: despegarFlightUrl(input, place.iata) });
+      } else {
+        const despegarSearch = new URL("https://www.despegar.com.mx/shop/flights/");
+        despegarSearch.searchParams.set("q", `${input.originIata} ${place.city} ${input.checkIn}`);
+        cityLinks.push({ label: "Buscar vuelos en Despegar", href: despegarSearch.toString() });
+      }
+      for (const airline of MEXICAN_AIRLINES) {
+        const href = AIRLINE_SITES[airline.code];
+        if (href) cityLinks.push({ label: airline.label, href });
+      }
+    }
+
+    const quote: Quote = {
+      place: place.city,
+      state: place.state,
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      nights,
+      adults: input.adults,
+      originLabel: place.flightMode && origin ? `${origin.city} · ${origin.airport}` : null,
+      flightMode: place.flightMode,
+      hotels: hotelResult.hotels,
+      flights: flightResult.flights,
+      otherFlights: flightResult.others,
+      hiddenFlights: flightResult.hidden,
+      best,
+      alternatives,
+      weather: sky,
+      usdMxn: rate,
+      notices,
+      fetchedAt: new Date().toISOString(),
+      cached: false,
+      cityLinks,
+    };
+    if (quote.hotels.length > 0 || quote.flights.length > 0 || quote.otherFlights.length > 0) {
+      const flightMissed =
+        quote.flightMode && quote.flights.length === 0 && quote.otherFlights.length === 0;
+      if (!flightMissed) {
+        await writeQuoteCache(key, quote, {
+          destinationId: place.id,
+          originIata: input.originIata,
+          checkIn: input.checkIn,
+          bestTotalMxn: best?.totalMxn ?? null,
+        });
+      }
+    }
+    return quote;
+  });
 }

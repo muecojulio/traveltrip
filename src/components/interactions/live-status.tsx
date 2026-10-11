@@ -8,5 +8,3 @@ export function LiveStatus({ message, className }: { message: string; className?
     </p>
   );
 }
-
-export { LiveStatus as SrOnlyStatus };

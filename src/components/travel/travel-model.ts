@@ -1,4 +1,7 @@
+import { addIsoDays, mexicoDate, money, nightsBetween } from "@/lib/travel/format";
 import type { Combo, Quote } from "@/lib/travel/types";
+
+export { addIsoDays, mexicoDate, money, nightsBetween };
 
 /** Everything the search form collects; one object keeps the panel props small. */
 export type SearchParams = {
@@ -16,14 +19,6 @@ export type Saved = { id: string; quote: Quote; selectedHotelName?: string };
 
 export function quoteId(quote: Quote, selectedHotelName = ""): string {
   return `${quote.place}|${quote.checkIn}|${quote.checkOut}|${quote.adults}|${selectedHotelName}`;
-}
-
-export function money(value: number): string {
-  return new Intl.NumberFormat("es-MX", {
-    style: "currency",
-    currency: "MXN",
-    maximumFractionDigits: 0,
-  }).format(value);
 }
 
 export function comboForHotel(quote: Quote, hotelName: string): Combo | null {
@@ -54,17 +49,4 @@ export function comboForHotel(quote: Quote, hotelName: string): Combo | null {
 
 export function savedCombo(item: Saved): Combo | null {
   return comboForHotel(item.quote, item.selectedHotelName ?? item.quote.best?.hotelName ?? "");
-}
-
-export function mexicoDate(offsetDays: number): string {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
-  const [year, month, day] = today.split("-").map(Number);
-  const date = new Date(Date.UTC(year, (month ?? 1) - 1, (day ?? 1) + offsetDays));
-  return date.toISOString().slice(0, 10);
-}
-
-export function addIsoDays(value: string, offset: number): string {
-  const date = new Date(`${value}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + offset);
-  return date.toISOString().slice(0, 10);
 }

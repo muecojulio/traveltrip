@@ -1,4 +1,4 @@
-export type ParsedHotel = {
+type ParsedHotel = {
   name: string;
   perNight: number;
   stayTotal: number;
@@ -23,7 +23,8 @@ function decode(value: string): string {
     .replaceAll(numApos, "'")
     .replaceAll(nbsp, " ")
     .replaceAll(numNbsp, " ")
-    .replace(/<[^>]+>/g, " ")
+    .replace(/<[^>]*>?/g, " ")
+    .replace(/[\p{Cc}<>]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -88,6 +89,14 @@ function parseRating(raw: string): number | null {
   return Number.isFinite(value) && value > 0 && value <= 5 ? value : null;
 }
 
+function sanitizeGoogleEntityPath(rawPath: string | undefined): string | null {
+  if (!rawPath) return null;
+  const decoded = decode(rawPath);
+  if (!decoded.startsWith("/travel/hotels/entity/")) return null;
+  if (decoded.includes("..") || /[\s"'<>\\]/.test(decoded)) return null;
+  return decoded.slice(0, 200);
+}
+
 /**
  * Read Google Hotels' publicly rendered price cards. This is intentionally a
  * tolerant HTML parser, not an official Google/Booking/Despegar API.
@@ -128,7 +137,7 @@ export function parseGoogleHotels(html: string, nights = 1): ParsedHotel[] {
       currency,
       rating: ratingMatch ? parseRating(ratingMatch[1] ?? "") : null,
       reviews: reviewsMatch ? parseCount(reviewsMatch[1] ?? "") : null,
-      googlePath: href?.[1] ? decode(href[1]) : null,
+      googlePath: sanitizeGoogleEntityPath(href?.[1]),
     });
     if (hotels.length >= 12) break;
   }

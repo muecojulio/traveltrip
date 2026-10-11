@@ -6,6 +6,8 @@ import {
   type Flight as GoogleFlight,
 } from "google-flights-ts";
 import { AIRLINE_SITES, MEXICO_AIRPORT_CODES } from "./catalog.ts";
+import { addIsoDays } from "./format.ts";
+import { sanitizePlainText } from "./security.ts";
 import type { FlightOffer } from "./types.ts";
 
 export type FlightSearchInput = {
@@ -124,12 +126,6 @@ export function parseFlightTime(value: string): number | null {
   return hours * 60 + minutes;
 }
 
-export function addDays(isoDate: string, offset: number): string {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  const date = new Date(Date.UTC(year ?? 2000, (month ?? 1) - 1, (day ?? 1) + offset));
-  return date.toISOString().slice(0, 10);
-}
-
 export function arrivalOffsetDays(value: string): number {
   const text = value.trim().toLowerCase();
   if (!text) return 0;
@@ -208,17 +204,18 @@ export function localizeGoogleFlight(
   const priceMxn = parsePositivePrice(flight.price);
   const arrivalMinutes = parseFlightTime(flight.arrival);
   const departureMinutes = parseFlightTime(flight.departure);
-  if (priceMxn == null || arrivalMinutes == null || departureMinutes == null || !flight.name) {
+  const airlineName = sanitizePlainText(flight.name ?? "", 80);
+  if (priceMxn == null || arrivalMinutes == null || departureMinutes == null || !airlineName) {
     return null;
   }
   const arrivalTime = formatTime(arrivalMinutes);
   const departureTime = formatTime(departureMinutes);
   const offsetDays = arrivalOffsetDays(flight.arrival_time_ahead);
-  const arrivalDate = addDays(input.checkIn, offsetDays);
+  const arrivalDate = addIsoDays(input.checkIn, offsetDays);
   const sameDay = offsetDays === 0;
   const arrivesBy14 = sameDay && arrivalMinutes <= 14 * 60;
-  const code = airlineCodeFromName(flight.name);
-  const official = airlineUrl(flight.name, code);
+  const code = airlineCodeFromName(airlineName);
+  const official = airlineUrl(airlineName, code);
   const links = [
     { label: "Google Flights", href: googleLink },
     { label: "Despegar", href: despegarLink },
@@ -234,8 +231,8 @@ export function localizeGoogleFlight(
   }
   if (input.cabinOnly) reasons.push("Google Flights no confirma la maleta de mano para esta tarifa");
   return {
-    id: `google-${code || normalizeCity(flight.name)}-${departureTime}-${arrivalTime}-${priceMxn}`,
-    airline: flight.name,
+    id: `google-${code || normalizeCity(airlineName)}-${departureTime}-${arrivalTime}-${priceMxn}`,
+    airline: airlineName,
     airlineCode: code,
     numbers: [],
     priceMxn,

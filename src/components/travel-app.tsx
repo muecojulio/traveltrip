@@ -1,19 +1,22 @@
-import { Bookmark, Compass, Moon, Plane, SunMedium } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { Bookmark, Compass, Moon, Plane, ShieldCheck, SunMedium } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionButton } from "@/components/interactions/action-button";
 import { LiveStatus } from "@/components/interactions/live-status";
 import { SectionTabBar, type SectionTabItem } from "@/components/interactions/section-tabs";
+import { HeroPanoramaSvg, PapelPicadoStrip } from "@/components/travel/mexican-art";
 import { SavedPanel } from "@/components/travel/saved-panel";
 import { SearchPanel } from "@/components/travel/search-panel";
-import { TripPanel } from "@/components/travel/trip-panel";
 import {
   mexicoDate,
   quoteId,
   type Saved,
   type SearchParams,
 } from "@/components/travel/travel-model";
+import { TripPanel } from "@/components/travel/trip-panel";
 import { DESTINATIONS, groundByName } from "@/lib/travel/catalog";
 import { searchTrip } from "@/lib/travel/search-fn";
+import { sanitizeSavedTrips } from "@/lib/travel/security";
 import type { Quote } from "@/lib/travel/types";
 import { sectionPanelId, sectionTabId } from "@/lib/interactions/dom-ids";
 import { useActionFeedback } from "@/lib/interactions/use-action-feedback";
@@ -21,7 +24,7 @@ import { usePanelSwipe } from "@/lib/interactions/use-panel-swipe";
 
 type Tab = "buscar" | "viaje" | "guardados";
 
-const SAVED_KEY = "traveltrip-saved";
+export const SAVED_KEY = "traveltrip-saved";
 const TAB_ORDER: Tab[] = ["buscar", "viaje", "guardados"];
 const ID_PREFIX = "section";
 
@@ -83,7 +86,9 @@ export function TravelApp() {
     setThemeReady(true);
     try {
       const raw = localStorage.getItem(SAVED_KEY);
-      if (raw) setSaved(JSON.parse(raw) as Saved[]);
+      if (raw) {
+        setSaved(sanitizeSavedTrips<Saved>(JSON.parse(raw)));
+      }
     } catch {
       setSaved([]);
     }
@@ -120,11 +125,12 @@ export function TravelApp() {
   });
 
   function persist(next: Saved[]) {
-    setSaved(next);
-    localStorage.setItem(SAVED_KEY, JSON.stringify(next.slice(0, 8)));
+    const safeNext = next.slice(0, 8);
+    setSaved(safeNext);
+    localStorage.setItem(SAVED_KEY, JSON.stringify(safeNext));
   }
 
-  async function runSearch(): Promise<boolean> {
+  async function executeSearch(forceRefresh = false): Promise<boolean> {
     setError("");
     try {
       const result = await searchTrip({
@@ -137,6 +143,7 @@ export function TravelApp() {
           adults: params.adults,
           cabinOnly: params.cabinOnly,
           arriveBy14: params.arriveBy14,
+          forceRefresh,
         },
       });
       if (!result.ok) {
@@ -159,7 +166,7 @@ export function TravelApp() {
     void search.run(
       async () => {
         lastError.current = "";
-        const ok = await runSearch();
+        const ok = await executeSearch(false);
         if (ok) selectTab("viaje", { focusPanel: true });
         return ok;
       },
@@ -177,10 +184,10 @@ export function TravelApp() {
     void refresh.run(
       async () => {
         lastError.current = "";
-        return runSearch();
+        return executeSearch(true);
       },
       {
-        loading: "Actualizando precios…",
+        loading: "Actualizando precios en vivo…",
         success: "Precios actualizados.",
         get error() {
           return lastError.current || "No se pudieron actualizar los precios.";
@@ -204,7 +211,7 @@ export function TravelApp() {
       },
       {
         loading: "Guardando…",
-        success: "Viaje guardado en este teléfono.",
+        success: "Viaje guardado en este dispositivo.",
         error: "No se pudo guardar el viaje.",
       },
     );
@@ -219,117 +226,158 @@ export function TravelApp() {
   }
 
   const statusMessage = search.message || refresh.message || save.message;
+  const destinationLabel = destination
+    ? destination.iata
+      ? `${destination.city} (${destination.iata})`
+      : destination.city
+    : params.customCity.trim() || "México";
 
   return (
-    <div className="mx-auto min-h-screen max-w-lg bg-bg text-ink">
-      <header className="flex items-center justify-between px-4 pt-5 pb-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="relative block h-6 w-8" aria-hidden="true">
-              <span className="absolute right-1 bottom-1 h-px w-7 bg-lagoon" />
-              <span className="absolute top-0 right-0 size-3 rounded-full bg-clay" />
-            </span>
-            <p className="font-display text-2xl leading-none">TravelTrip</p>
+    <div className="min-h-screen text-ink">
+      <PapelPicadoStrip />
+
+      <div className="mx-auto max-w-3xl">
+        <header className="px-4 pt-4 pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <span
+                  className="relative grid size-9 place-items-center rounded-xl border border-clay/40 bg-clay/15"
+                  aria-hidden="true"
+                >
+                  <span className="size-3.5 rounded-full bg-clay" />
+                  <span className="absolute right-1 bottom-1 size-2 rounded-full bg-marigold" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-display text-2xl leading-none">TravelTrip</p>
+                    <span className="rounded-full bg-lagoon-soft px-2 py-0.5 text-[10px] font-semibold tracking-wider text-lagoon uppercase">
+                      México Vivo
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted sm:text-sm">
+                    Hotel en vivo + vuelo redondo antes de las 2 pm con maleta confirmada
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <Link
+                to="/privacidad"
+                className="tap press lift hidden min-h-10 items-center gap-1.5 rounded-full border border-line bg-elev px-3 text-xs font-medium text-ink sm:inline-flex"
+              >
+                <ShieldCheck aria-hidden="true" className="size-3.5 text-lagoon" />
+                Privacidad
+              </Link>
+              <ActionButton
+                size="icon"
+                variant="secondary"
+                label={theme === "dark" ? "Tema claro" : "Tema oscuro"}
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                className="rounded-full"
+              >
+                {theme === "dark" ? (
+                  <SunMedium aria-hidden="true" className="size-5 text-marigold" />
+                ) : (
+                  <Moon aria-hidden="true" className="size-5 text-lagoon" />
+                )}
+              </ActionButton>
+            </div>
           </div>
-          <p className="mt-1 text-sm text-muted">Hotel en vivo. Vuelo antes de las 2 pm.</p>
-        </div>
-        <ActionButton
-          size="icon"
-          variant="secondary"
-          label={theme === "dark" ? "Tema claro" : "Tema oscuro"}
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          className="rounded-full"
-        >
-          {theme === "dark" ? (
-            <SunMedium aria-hidden="true" className="size-5" />
-          ) : (
-            <Moon aria-hidden="true" className="size-5" />
-          )}
-        </ActionButton>
-      </header>
 
-      <LiveStatus message={statusMessage} />
+          <div className="mt-3">
+            <HeroPanoramaSvg
+              originIata={params.originIata}
+              destinationCode={destinationLabel}
+              flightMode={flightLikely}
+            />
+          </div>
+        </header>
 
-      <div className="px-4 pb-28">
-        <div ref={swipe.containerRef} className="panel-swipe" {...swipe.containerProps}>
-          <div
-            role="tabpanel"
-            id={sectionPanelId(ID_PREFIX, "buscar")}
-            aria-labelledby={sectionTabId(ID_PREFIX, "buscar")}
-            tabIndex={-1}
-            hidden={tab !== "buscar"}
-            ref={(node) => {
-              panelRefs.current.set("buscar", node);
-            }}
-            className={tab === "buscar" ? "panel-enter space-y-4" : undefined}
-            data-direction={direction}
-          >
-            <SearchPanel
-              params={params}
-              onChange={(patch) => {
-                setParams((current) => ({ ...current, ...patch }));
-                setError("");
+        <LiveStatus message={statusMessage} />
+
+        <div className="px-4 pb-28">
+          <div ref={swipe.containerRef} className="panel-swipe" {...swipe.containerProps}>
+            <div
+              role="tabpanel"
+              id={sectionPanelId(ID_PREFIX, "buscar")}
+              aria-labelledby={sectionTabId(ID_PREFIX, "buscar")}
+              tabIndex={-1}
+              hidden={tab !== "buscar"}
+              ref={(node) => {
+                panelRefs.current.set("buscar", node);
               }}
-              onSearch={onSearch}
-              flightLikely={flightLikely}
-              searchReady={searchReady}
-              error={error}
-              searchState={search.state}
-            />
-          </div>
+              className={tab === "buscar" ? "panel-enter space-y-4" : undefined}
+              data-direction={direction}
+            >
+              <SearchPanel
+                params={params}
+                onChange={(patch) => {
+                  setParams((current) => ({ ...current, ...patch }));
+                  setError("");
+                }}
+                onSearch={onSearch}
+                flightLikely={flightLikely}
+                searchReady={searchReady}
+                error={error}
+                searchState={search.state}
+              />
+            </div>
 
-          <div
-            role="tabpanel"
-            id={sectionPanelId(ID_PREFIX, "viaje")}
-            aria-labelledby={sectionTabId(ID_PREFIX, "viaje")}
-            tabIndex={-1}
-            hidden={tab !== "viaje"}
-            ref={(node) => {
-              panelRefs.current.set("viaje", node);
-            }}
-            className={tab === "viaje" ? "panel-enter space-y-4" : undefined}
-            data-direction={direction}
-          >
-            <TripPanel
-              quote={quote}
-              loading={search.state === "loading" || refresh.state === "loading"}
-              refreshState={refresh.state}
-              saveState={save.state}
-              onRefresh={onRefresh}
-              onSave={onSave}
-              onSelectHotel={setSelectedHotelName}
-              selectedHotelName={selectedHotelName}
-              saved={quote ? savedIds.has(quoteId(quote, selectedHotelName)) : false}
-            />
-          </div>
+            <div
+              role="tabpanel"
+              id={sectionPanelId(ID_PREFIX, "viaje")}
+              aria-labelledby={sectionTabId(ID_PREFIX, "viaje")}
+              tabIndex={-1}
+              hidden={tab !== "viaje"}
+              ref={(node) => {
+                panelRefs.current.set("viaje", node);
+              }}
+              className={tab === "viaje" ? "panel-enter space-y-4" : undefined}
+              data-direction={direction}
+            >
+              <TripPanel
+                quote={quote}
+                loading={search.state === "loading" || refresh.state === "loading"}
+                refreshState={refresh.state}
+                saveState={save.state}
+                onRefresh={onRefresh}
+                onSave={onSave}
+                onSelectHotel={setSelectedHotelName}
+                selectedHotelName={selectedHotelName}
+                saved={quote ? savedIds.has(quoteId(quote, selectedHotelName)) : false}
+              />
+            </div>
 
-          <div
-            role="tabpanel"
-            id={sectionPanelId(ID_PREFIX, "guardados")}
-            aria-labelledby={sectionTabId(ID_PREFIX, "guardados")}
-            tabIndex={-1}
-            hidden={tab !== "guardados"}
-            ref={(node) => {
-              panelRefs.current.set("guardados", node);
-            }}
-            className={tab === "guardados" ? "panel-enter space-y-4" : undefined}
-            data-direction={direction}
-          >
-            <SavedPanel
-              saved={saved}
-              onRemove={(id) => persist(saved.filter((row) => row.id !== id))}
-              onClear={() => persist([])}
-              onOpen={openSaved}
-            />
+            <div
+              role="tabpanel"
+              id={sectionPanelId(ID_PREFIX, "guardados")}
+              aria-labelledby={sectionTabId(ID_PREFIX, "guardados")}
+              tabIndex={-1}
+              hidden={tab !== "guardados"}
+              ref={(node) => {
+                panelRefs.current.set("guardados", node);
+              }}
+              className={tab === "guardados" ? "panel-enter space-y-4" : undefined}
+              data-direction={direction}
+            >
+              <SavedPanel
+                saved={saved}
+                onRemove={(id) => persist(saved.filter((row) => row.id !== id))}
+                onClear={() => persist([])}
+                onOpen={openSaved}
+              />
+            </div>
           </div>
         </div>
       </div>
 
       <nav
-        className="fixed inset-x-0 bottom-0 border-t border-line bg-bg pb-[env(safe-area-inset-bottom)]"
+        className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-bg/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
         aria-label="Navegación principal"
       >
-        <div className="mx-auto max-w-lg">
+        <div className="mx-auto max-w-3xl">
           <SectionTabBar
             items={TABS}
             value={tab}

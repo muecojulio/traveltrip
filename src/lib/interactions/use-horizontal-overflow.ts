@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
 
-export type OverflowState = {
+type OverflowState = {
   hasOverflow: boolean;
   atStart: boolean;
   atEnd: boolean;
