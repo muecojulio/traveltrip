@@ -5,18 +5,53 @@ import {
   Luggage,
   Moon,
   Plane,
+  RefreshCw,
   Search,
   SunMedium,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { DESTINATIONS, ORIGINS } from "@/lib/travel/catalog";
+import { DESTINATIONS, ORIGINS, groundByName } from "@/lib/travel/catalog";
 import { searchTrip } from "@/lib/travel/search-fn";
-import type { FlightOffer, Quote } from "@/lib/travel/types";
+import type { Combo, FlightOffer, Quote } from "@/lib/travel/types";
 
 type Tab = "buscar" | "viaje" | "guardados";
 
-type Saved = { id: string; quote: Quote };
+type Saved = { id: string; quote: Quote; selectedHotelName?: string };
+
+function quoteId(quote: Quote, selectedHotelName = ""): string {
+  return `${quote.place}|${quote.checkIn}|${quote.checkOut}|${quote.adults}|${selectedHotelName}`;
+}
+
+function comboForHotel(quote: Quote, hotelName: string): Combo | null {
+  const hotel = quote.hotels.find((item) => item.name === hotelName) ?? quote.hotels[0];
+  if (!hotel) return null;
+  const flight = quote.flightMode ? quote.flights[0] : null;
+  if (quote.flightMode && !flight) return null;
+  const flightMxn = flight?.priceMxn ?? 0;
+  const totalMxn = hotel.stayTotalMxn + flightMxn;
+  const flightLabel = flight
+    ? `${flight.airline}${flight.numbers[0] ? ` ${flight.numbers[0]}` : ""}`
+    : null;
+  const cabin = flight?.cabinIncluded ?? null;
+  const why = flight
+    ? `${hotel.name} (${money(hotel.stayTotalMxn)}) más ${flightLabel}, llegada ${flight.arrivalTime}; vuelo ${money(flightMxn)}. ${cabin === true ? "Incluye maleta de mano confirmada." : cabin === false ? "No incluye maleta de mano." : "Verifica la maleta de mano en la aerolínea."} Total ${money(totalMxn)}.`
+    : `${hotel.name} es la estancia más baja publicada para esas fechas: ${money(hotel.stayTotalMxn)}. El destino se cotiza sin vuelo.`;
+  return {
+    hotelName: hotel.name,
+    hotelMxn: hotel.stayTotalMxn,
+    flightLabel,
+    flightMxn,
+    totalMxn,
+    arrival: flight?.arrivalTime ?? null,
+    cabin,
+    why,
+  };
+}
+
+function savedCombo(item: Saved): Combo | null {
+  return comboForHotel(item.quote, item.selectedHotelName ?? item.quote.best?.hotelName ?? "");
+}
 
 const SAVED_KEY = "traveltrip-saved";
 
@@ -24,6 +59,12 @@ function mexicoDate(offsetDays: number): string {
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
   const [year, month, day] = today.split("-").map(Number);
   const date = new Date(Date.UTC(year, (month ?? 1) - 1, (day ?? 1) + offsetDays));
+  return date.toISOString().slice(0, 10);
+}
+
+function addIsoDays(value: string, offset: number): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + offset);
   return date.toISOString().slice(0, 10);
 }
 
@@ -77,10 +118,15 @@ export function TravelApp() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [selectedHotelName, setSelectedHotelName] = useState("");
   const [saved, setSaved] = useState<Saved[]>([]);
 
   const destination = DESTINATIONS.find((item) => item.id === destinationId);
-  const flightLikely = destination ? !destination.groundOnly && destination.iata !== "MEX" : true;
+  const flightLikely = destination
+    ? !destination.groundOnly
+    : destinationId === "custom"
+      ? !groundByName(customCity)
+      : true;
 
   useEffect(() => {
     const storedTheme = localStorage.getItem("traveltrip-theme");
@@ -104,6 +150,9 @@ export function TravelApp() {
   }, [theme, themeReady]);
 
   const savedIds = useMemo(() => new Set(saved.map((item) => item.id)), [saved]);
+  const searchReady =
+    Boolean(checkIn && checkOut && checkOut > checkIn) &&
+    (destinationId !== "custom" || customCity.trim().length >= 3);
 
   function persist(next: Saved[]) {
     setSaved(next);
@@ -131,6 +180,7 @@ export function TravelApp() {
         return;
       }
       setQuote(result.quote);
+      setSelectedHotelName(result.quote.best?.hotelName ?? result.quote.hotels[0]?.name ?? "");
       setTab("viaje");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo buscar.");
@@ -139,10 +189,10 @@ export function TravelApp() {
     }
   }
 
-  function saveQuote(current: Quote) {
-    const id = `${current.place}|${current.checkIn}|${current.checkOut}|${current.adults}`;
+  function saveQuote(current: Quote, hotelName: string) {
+    const id = quoteId(current, hotelName);
     if (savedIds.has(id)) return;
-    persist([{ id, quote: current }, ...saved].slice(0, 8));
+    persist([{ id, quote: current, selectedHotelName: hotelName }, ...saved].slice(0, 8));
   }
 
   return (
@@ -218,7 +268,7 @@ export function TravelApp() {
               </label>
             ) : null}
 
-            {flightLikely || destinationId === "custom" ? (
+            {flightLikely ? (
               <label className="block text-sm text-muted">
                 Sales de
                 <select
@@ -246,7 +296,12 @@ export function TravelApp() {
                   type="date"
                   value={checkIn}
                   min={mexicoDate(0)}
-                  onChange={(event) => setCheckIn(event.target.value)}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setCheckIn(next);
+                    setError("");
+                    if (next && checkOut <= next) setCheckOut(addIsoDays(next, 1));
+                  }}
                   className="mt-1 min-h-12 w-full rounded-xl border border-line bg-elev px-3"
                 />
               </label>
@@ -255,8 +310,11 @@ export function TravelApp() {
                 <input
                   type="date"
                   value={checkOut}
-                  min={checkIn}
-                  onChange={(event) => setCheckOut(event.target.value)}
+                  min={checkIn ? addIsoDays(checkIn, 1) : mexicoDate(1)}
+                  onChange={(event) => {
+                    setCheckOut(event.target.value);
+                    setError("");
+                  }}
                   className="mt-1 min-h-12 w-full rounded-xl border border-line bg-elev px-3"
                 />
               </label>
@@ -288,11 +346,19 @@ export function TravelApp() {
             <Switch on={cabinOnly} onChange={setCabinOnly} label="Solo tarifas con maleta de mano" />
             <Switch on={arriveBy14} onChange={setArriveBy14} label="Llegar a más tardar a las 2 pm" />
 
-            {error ? <p className="text-sm text-warn">{error}</p> : null}
+            {checkIn && checkOut && checkOut <= checkIn ? (
+              <p role="alert" className="text-sm text-warn">
+                La salida debe ser después de la llegada.
+              </p>
+            ) : null}
+            {destinationId === "custom" && customCity.trim().length < 3 ? (
+              <p className="text-sm text-muted">Escribe el nombre de la ciudad para consultar.</p>
+            ) : null}
+            {error ? <p role="alert" className="text-sm text-warn">{error}</p> : null}
 
             <button
               type="button"
-              disabled={loading}
+              disabled={loading || !searchReady}
               onClick={onSearch}
               className="press flex min-h-12 w-full items-center justify-center gap-2 rounded-card bg-clay px-4 font-medium text-clay-ink disabled:opacity-60"
             >
@@ -313,8 +379,11 @@ export function TravelApp() {
           <TripView
             quote={quote}
             loading={loading}
-            onSave={() => quote && saveQuote(quote)}
-            saved={quote ? savedIds.has(`${quote.place}|${quote.checkIn}|${quote.checkOut}|${quote.adults}`) : false}
+            onSave={() => quote && saveQuote(quote, selectedHotelName)}
+            onRefresh={() => void onSearch()}
+            onSelectHotel={setSelectedHotelName}
+            selectedHotelName={selectedHotelName}
+            saved={quote ? savedIds.has(quoteId(quote, selectedHotelName)) : false}
           />
         ) : null}
 
@@ -334,8 +403,11 @@ export function TravelApp() {
                         {item.quote.checkIn} → {item.quote.checkOut}
                       </p>
                       <p className="mt-2 text-lg">
-                        {item.quote.best ? money(item.quote.best.totalMxn) : "Sin total"}
+                        {savedCombo(item) ? money(savedCombo(item)?.totalMxn ?? 0) : "Sin total"}
                       </p>
+                      {item.selectedHotelName ? (
+                        <p className="text-xs text-muted">{item.selectedHotelName}</p>
+                      ) : null}
                     </div>
                     <button
                       type="button"
@@ -351,6 +423,9 @@ export function TravelApp() {
                     className="press mt-3 min-h-11 text-sm text-lagoon"
                     onClick={() => {
                       setQuote(item.quote);
+                      setSelectedHotelName(
+                        item.selectedHotelName ?? item.quote.best?.hotelName ?? item.quote.hotels[0]?.name ?? "",
+                      );
                       setTab("viaje");
                     }}
                   >
@@ -388,22 +463,36 @@ function FlightCard({ flight, muted = false }: { flight: FlightOffer; muted?: bo
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-medium">{flight.airline}</p>
-          <p className="text-sm text-muted">{flight.numbers.join(" · ")}</p>
+          <p className="text-sm text-muted">
+            {flight.numbers.length ? flight.numbers.join(" · ") : flight.source}
+          </p>
         </div>
-        <p className="font-display text-2xl">{money(flight.priceMxn)}</p>
+        <div className="text-right">
+          <p className="font-display text-2xl">{money(flight.priceMxn)}</p>
+          <p className="text-xs text-muted">ida y vuelta · grupo</p>
+        </div>
       </div>
       <p className="mt-2 text-sm">
         {flight.departureAirport} {flight.departureTime} → {flight.arrivalAirport} {flight.arrivalTime}
       </p>
       <div className="mt-2 flex flex-wrap gap-2 text-xs">
         <span className={`rounded-full px-2 py-1 ${flight.arrivesBy14 ? "bg-lagoon-soft text-good" : "bg-line text-warn"}`}>
-          {flight.arrivesBy14 ? "Llega antes de las 14:00" : flight.rejectReason ?? `Llega ${flight.arrivalTime}`}
+          {flight.arrivesBy14
+            ? "Llega el mismo día antes de las 14:00"
+            : flight.sameDay
+              ? `Llega ${flight.arrivalTime} · después de las 14:00`
+              : `Llega ${flight.arrivalDate || "otro día"} · ${flight.arrivalTime}`}
         </span>
         <span className="inline-flex items-center gap-1 rounded-full bg-lagoon-soft px-2 py-1">
           <Luggage className="size-3" />
-          {flight.cabinIncluded ? "Maleta de mano" : "Sin maleta de mano confirmada"}
+          {flight.cabinIncluded === true
+            ? "Maleta de mano incluida"
+            : flight.cabinIncluded === false
+              ? "Sin maleta de mano"
+              : "Maleta de mano por confirmar"}
         </span>
       </div>
+      {flight.rejectReason ? <p className="mt-2 text-xs text-warn">{flight.rejectReason}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         {flight.links.map((link) => (
           <a
@@ -450,15 +539,21 @@ function TripView({
   quote,
   loading,
   onSave,
+  onRefresh,
+  onSelectHotel,
+  selectedHotelName,
   saved,
 }: {
   quote: Quote | null;
   loading: boolean;
   onSave: () => void;
+  onRefresh: () => void;
+  onSelectHotel: (hotelName: string) => void;
+  selectedHotelName: string;
   saved: boolean;
 }) {
-  if (loading) {
-    return <p className="rounded-card border border-line bg-elev px-4 py-6 text-sm">Consultando tarifas…</p>;
+  if (!quote && loading) {
+    return <p className="rounded-card border border-line bg-elev px-4 py-6 text-sm">Consultando hoteles y vuelos…</p>;
   }
   if (!quote) {
     return (
@@ -473,9 +568,21 @@ function TripView({
   const notices = quote.notices ?? [];
   const weather = quote.weather ?? [];
   const cityLinks = quote.cityLinks ?? [];
-  const hotelShare = quote.best && quote.best.totalMxn > 0
-    ? Math.round((quote.best.hotelMxn / quote.best.totalMxn) * 100)
+  const selectedCombo = comboForHotel(quote, selectedHotelName);
+  const displayCombo = selectedCombo ?? quote.best;
+  const hotelShare = displayCombo && displayCombo.totalMxn > 0
+    ? Math.round((displayCombo.hotelMxn / displayCombo.totalMxn) * 100)
     : 0;
+  const fetchedAt = new Date(quote.fetchedAt);
+  const fetchedAtLabel = Number.isNaN(fetchedAt.valueOf())
+    ? "Hora de consulta no disponible"
+    : fetchedAt.toLocaleString("es-MX", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "America/Mexico_City",
+      });
+  const selectedName = selectedCombo?.hotelName ?? quote.best?.hotelName ?? "";
+
   return (
     <section className="rise space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -486,35 +593,56 @@ function TripView({
             {quote.adults === 1 ? "adulto" : "adultos"}
           </p>
           {quote.originLabel ? <p className="text-sm text-muted">Desde {quote.originLabel}</p> : null}
+          <p className="mt-1 text-xs text-muted">
+            {quote.cached ? "Precio consultado recientemente" : "Consulta de precios"} · {fetchedAtLabel}
+            {quote.cached ? " · caché máx. 5 min" : ""}
+          </p>
+          {loading ? <p className="mt-1 text-xs text-clay">Actualizando precios…</p> : null}
         </div>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saved}
-          className="press grid size-11 place-items-center rounded-full border border-line bg-elev"
-          aria-label="Guardar viaje"
-        >
-          <Bookmark className={`size-4 ${saved ? "fill-clay text-clay" : ""}`} />
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="press grid size-11 place-items-center rounded-full border border-line bg-elev disabled:opacity-60"
+            aria-label="Actualizar precios"
+            title="Actualizar precios"
+          >
+            <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saved}
+            className="press grid size-11 place-items-center rounded-full border border-line bg-elev disabled:opacity-60"
+            aria-label="Guardar viaje"
+            title={saved ? "Viaje guardado" : "Guardar viaje"}
+          >
+            <Bookmark className={`size-4 ${saved ? "fill-clay text-clay" : ""}`} />
+          </button>
+        </div>
       </div>
 
-      {quote.best ? (
+      {displayCombo ? (
         <article className="card-shadow rounded-card border border-clay bg-elev p-4">
-          <p className="text-xs tracking-wide text-clay uppercase">Más barato</p>
-          <p className="mt-1 font-display text-4xl">{money(quote.best.totalMxn)}</p>
-          <p className="mt-2 text-sm leading-relaxed">{quote.best.why}</p>
+          <p className="text-xs tracking-wide text-clay uppercase">
+            {selectedName && selectedName !== quote.best?.hotelName ? "Total con hotel elegido" : "Combinación más barata"}
+          </p>
+          <p className="mt-1 font-display text-4xl">{money(displayCombo.totalMxn)}</p>
+          <p className="mt-2 text-sm leading-relaxed">{displayCombo.why}</p>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-line">
             <div className="h-full bg-lagoon" style={{ width: `${hotelShare}%` }} />
           </div>
           <p className="mt-2 text-xs text-muted">
-            Hotel {money(quote.best.hotelMxn)}
-            {quote.flightMode ? ` · Vuelo ${money(quote.best.flightMxn)}` : ""}
-            {quote.cached ? " · copia reciente" : " · recién consultado"}
+            Hotel {money(displayCombo.hotelMxn)}
+            {quote.flightMode ? ` · Vuelo redondo ${money(displayCombo.flightMxn)}` : " · sin vuelo"}
           </p>
         </article>
       ) : (
         <p className="rounded-card border border-line bg-elev px-4 py-4 text-sm">
-          No hubo una combinación que cumpla las reglas. Revisa los hoteles y, si aplica, afloja la hora o la maleta.
+          {quote.flightMode
+            ? "No hay una tarifa confirmada que cumpla la llegada y la maleta de mano. Consulta los enlaces de vuelo y verifica el equipaje antes de sumar un total."
+            : "No hubo tarifas de hotel legibles para calcular un total. Abre Booking o Despegar con las fechas elegidas."}
         </p>
       )}
 
@@ -549,75 +677,85 @@ function TripView({
       {quote.flightMode ? (
         <div>
           <h2 className="mb-2 flex items-center gap-2 font-display text-2xl">
-            <Plane className="size-5" /> Vuelos
+            <Plane className="size-5" /> Vuelos de ida y vuelta
           </h2>
           {otherFlights.length > 0 ? (
             <p className="mb-2 text-xs text-muted">
               {flights.length === 0
-                ? "Ninguna de las tarifas más baratas llega antes de las 14:00 con maleta de mano confirmada."
-                : `${otherFlights.length} tarifas quedaron fuera por la hora o la maleta de mano.`}
+                ? "Estas tarifas no cumplen todos los filtros activos; sirven para comparar y revisar su equipaje."
+                : `${otherFlights.length} alternativas no cumplen la hora o la maleta de mano seleccionada.`}
             </p>
           ) : null}
           <div className="space-y-3">
-            {flights.length === 0 ? (
-              <p className="text-sm text-muted">Abre Despegar o la aerolínea para ver salidas de mañana.</p>
-            ) : (
-              flights.map((flight) => (
-                <FlightCard key={flight.id} flight={flight} />
-              ))
-            )}
-            {otherFlights.map((flight) => (
-              <FlightCard key={flight.id} flight={flight} muted />
-            ))}
+            {flights.length === 0 && otherFlights.length === 0 ? (
+              <p className="text-sm text-muted">
+                No hay tarifas comprobables ahora. Usa Google Flights, Despegar o los sitios oficiales de las aerolíneas de arriba para buscar la ruta.
+              </p>
+            ) : null}
+            {flights.map((flight) => <FlightCard key={flight.id} flight={flight} />)}
+            {otherFlights.map((flight) => <FlightCard key={flight.id} flight={flight} muted />)}
           </div>
         </div>
       ) : null}
 
       <div>
-        <h2 className="mb-2 font-display text-2xl">Hoteles</h2>
+        <h2 className="mb-1 font-display text-2xl">Hoteles</h2>
+        <p className="mb-2 text-xs text-muted">Elige uno para actualizar el total con el vuelo más barato que cumple tus filtros.</p>
         <div className="space-y-3">
           {hotels.length === 0 ? (
             <p className="text-sm text-muted">No hubo tarifas de hotel legibles. Abre Booking o Despegar arriba.</p>
           ) : (
-            hotels.map((hotel) => (
-              <article key={hotel.name} className="rounded-card border border-line bg-elev p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-medium leading-snug">{hotel.name}</h3>
-                    <p className="text-xs text-muted">
-                      {hotel.rating ? `${hotel.rating.toFixed(1)} / 5` : "Sin calificación"}
-                      {hotel.reviews ? ` · ${hotel.reviews} reseñas` : ""}
-                    </p>
+            hotels.map((hotel) => {
+              const selected = hotel.name === selectedName;
+              return (
+                <article
+                  key={hotel.name}
+                  className={`rounded-card border bg-elev p-4 ${selected ? "border-clay" : "border-line"}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSelectHotel(hotel.name)}
+                    aria-pressed={selected}
+                    className="press flex min-h-16 w-full items-start justify-between gap-3 text-left"
+                  >
+                    <span className="min-w-0">
+                      <span className="block font-medium leading-snug">{hotel.name}</span>
+                      <span className="mt-1 block text-xs text-muted">
+                        {hotel.rating ? `${hotel.rating.toFixed(1)} / 5` : "Sin calificación"}
+                        {hotel.reviews ? ` · ${hotel.reviews} reseñas` : ""}
+                      </span>
+                      <span className={`mt-2 inline-block text-xs ${selected ? "text-clay" : "text-lagoon"}`}>
+                        {selected ? "Hotel elegido" : "Seleccionar este hotel"}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="block font-display text-2xl">{money(hotel.stayTotalMxn)}</span>
+                      <span className="block text-xs text-muted">{money(hotel.perNightMxn)} / noche</span>
+                    </span>
+                  </button>
+                  <p className="mt-2 text-xs text-muted">{hotel.source}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {hotel.links.map((link) => (
+                      <a
+                        key={link.label}
+                        href={link.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="press inline-flex min-h-11 items-center rounded-full border border-line px-3 text-sm"
+                      >
+                        {link.label}
+                      </a>
+                    ))}
                   </div>
-                  <div className="text-right">
-                    <p className="font-display text-2xl">{money(hotel.stayTotalMxn)}</p>
-                    <p className="text-xs text-muted">{money(hotel.perNightMxn)} / noche</p>
-                  </div>
-                </div>
-                <p className="mt-2 text-xs text-muted">{hotel.source}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {hotel.links.map((link) => (
-                    <a
-                      key={link.label}
-                      href={link.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="press inline-flex min-h-11 items-center rounded-full border border-line px-3 text-sm"
-                    >
-                      {link.label}
-                    </a>
-                  ))}
-                </div>
-              </article>
-            ))
+                </article>
+              );
+            })
           )}
         </div>
       </div>
 
       <ul className="space-y-2 text-xs leading-relaxed text-muted">
-        {notices.map((notice) => (
-          <li key={notice}>{notice}</li>
-        ))}
+        {notices.map((notice) => <li key={notice}>{notice}</li>)}
         {quote.usdMxn ? <li>Tipo de cambio público: 1 USD = {quote.usdMxn.toFixed(2)} MXN.</li> : null}
       </ul>
     </section>

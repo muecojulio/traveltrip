@@ -26,6 +26,7 @@ export type FlightOffer = {
   direct: boolean;
   durationMinutes: number | null;
   gate: string;
+  source: string;
   qualifies: boolean;
   rejectReason: string | null;
   links: { label: string; href: string }[];

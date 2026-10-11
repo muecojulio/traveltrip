@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   appNameFromHost,
-  createHeadInjector,
+  createHeadInjector as createHeadInjectorWithContext,
   grokXCreatorHeadTags,
-  injectGrokPwaHead,
+  injectGrokPwaHead as injectGrokPwaHeadWithContext,
   isDocumentPath,
   isInstallQuery,
   publicAppHost,
@@ -20,6 +20,18 @@ import {
 import { renderInstallPage } from "./grok-pwa-plugin.mjs";
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const EMPTY_ROOT = mkdtempSync(join(tmpdir(), "grok-pwa-empty-root-"));
+
+// The tracked sample app has its own src/lib/og/site.json and public/ card.
+// These unit tests exercise the injector's fallback behavior, so isolate them
+// from the current project's branding unless a test supplies its own cwd.
+function injectGrokPwaHead(html, ctx = {}) {
+  return injectGrokPwaHeadWithContext(html, { cwd: EMPTY_ROOT, ...ctx });
+}
+
+function createHeadInjector(ctx = {}) {
+  return createHeadInjectorWithContext({ cwd: EMPTY_ROOT, ...ctx });
+}
 
 test("injects before </head>", () => {
   const out = injectGrokPwaHead("<html><head><title>x</title></head><body></body></html>");

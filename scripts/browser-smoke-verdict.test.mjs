@@ -9,6 +9,8 @@ import {
   compareToBaseline,
   derivedPaths,
   exitCodeFor,
+  filterConsoleErrors,
+  GROK_EXTENSION_SCRIPT_URL,
   normalizeBodyText,
   normalizedBodyTextHash,
   parseSmokeArgs,
@@ -276,10 +278,37 @@ test("baselineComparison fails closed on malformed or wrong-shape baselines", ()
   }
 });
 
+test("filters only a blocked platform-extension load error from app console errors", () => {
+  const blocked = {
+    url: GROK_EXTENSION_SCRIPT_URL,
+    errorText: "net::ERR_CONNECTION_CLOSED",
+  };
+  assert.deepEqual(
+    filterConsoleErrors(
+      [
+        "Failed to load resource: net::ERR_CONNECTION_CLOSED",
+        "TypeError: app code failed",
+        "Failed to load resource: net::ERR_CONNECTION_CLOSED",
+      ],
+      [blocked],
+    ),
+    [
+      "TypeError: app code failed",
+      "Failed to load resource: net::ERR_CONNECTION_CLOSED",
+    ],
+  );
+  assert.deepEqual(
+    filterConsoleErrors(["Failed to load resource: net::ERR_CONNECTION_CLOSED"], [
+      { ...blocked, errorText: "net::ERR_BLOCKED_BY_CLIENT" },
+    ]),
+    ["Failed to load resource: net::ERR_CONNECTION_CLOSED"],
+  );
+});
+
 test("parseSmokeArgs defaults", () => {
   assert.deepEqual(parseSmokeArgs([], {}), {
     url: "http://127.0.0.1:8080/",
-    outPng: "/workspace/screenshots/app-builder-preview.png",
+    outPng: join(process.cwd(), "screenshots/app-builder-preview.png"),
     baseline: "",
   });
 });
@@ -375,12 +404,15 @@ test("browser-smoke wires the guard and verdict helpers", () => {
   const src = readFileSync(join(TEMPLATE_ROOT, "scripts/browser-smoke.mjs"), "utf8");
   assert.match(src, /from "\.\/browser-guard\.mjs"/);
   assert.match(src, /from "\.\/browser-smoke-verdict\.mjs"/);
-  assert.match(src, /const args = parseSmokeArgs\(process\.argv\.slice\(2\), process\.env\)/);
+  assert.match(
+    src,
+    /const args = parseSmokeArgs\(process\.argv\.slice\(2\), process\.env, DEFAULT_OUTPUT_PNG\)/,
+  );
   assert.match(src, /const url = checkedUrl\(args\.url\)/);
-  assert.match(src, /const outPng = checkedOutputPath\(args\.outPng, \["\/workspace"\]\)/);
-  assert.match(src, /const mobilePng = checkedOutputPath\(derived\.mobilePng, \["\/workspace"\]\)/);
-  assert.match(src, /const outJson = checkedOutputPath\(derived\.verdictJson, \["\/workspace"\]/);
-  assert.match(src, /checkedOutputPath\(realpathSync\(args\.baseline\), \["\/workspace"\]/);
+  assert.match(src, /const outPng = checkedOutputPath\(args\.outPng, \[SCREENSHOT_DIR\]\)/);
+  assert.match(src, /const mobilePng = checkedOutputPath\(derived\.mobilePng, \[SCREENSHOT_DIR\]\)/);
+  assert.match(src, /const outJson = checkedOutputPath\(derived\.verdictJson, \[SCREENSHOT_DIR\]/);
+  assert.match(src, /checkedOutputPath\(realpathSync\(args\.baseline\), \[SCREENSHOT_DIR\]/);
   assert.match(src, /baselinePath === outJson/);
   assert.match(src, /normalizedBodyTextHash\(/);
   assert.match(src, /bodyTextPrefix\(/);
